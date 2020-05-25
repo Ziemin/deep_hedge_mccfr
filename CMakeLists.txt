@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.14)
-project(deep_vr_mccfr VERSION 0.0.1 LANGUAGES CXX)
+project(deep_mw_cfr VERSION 0.0.1 LANGUAGES CXX)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
@@ -42,11 +42,9 @@ execute_process(
 if (NOT OPEN_SPIEL_DEPS EQUAL "0")
   message(FATAL_ERROR "./scripts/initialize_open_spiel.sh failed")
 endif ()
-add_subdirectory(extern/open-spiel/open_spiel)
-
+add_subdirectory(extern/open-spiel/open_spiel EXCLUDE_FROM_ALL)
 
 ###############################################################
-# AREL
 
 # clang tidy
 # set(CMAKE_CXX_CLANG_TIDY
@@ -56,27 +54,7 @@ add_subdirectory(extern/open-spiel/open_spiel)
 
 # set(CMAKE_CXX_CPPCHECK "cppcheck")
 
-add_library(deep_vr_mccfr STATIC)
-add_library(deep_vr_mccfr::deep_vr_mccfr ALIAS deep_vr_mccfr)
-target_compile_features(deep_vr_mccfr PRIVATE cxx_std_20)
-target_compile_options(deep_vr_mccfr PRIVATE -Wall -Wextra -Wunreachable-code)
-
-target_include_directories(deep_vr_mccfr
-  PUBLIC
-    include
-    # $<INSTALL_INTERFACE:include>
-    # $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    ${TORCH_INCLUDE_DIRS}
-  # PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/src)
-
-target_link_libraries(deep_vr_mccfr
-  PUBLIC
-    ${TORCH_LIBRARIES}
-    Boost::filesystem
-    range-v3)
-
-option(AREL_BUILD_TESTS "Should the tests for Deep-VR-MCCFR be built" ON)
+option(DEEP_MW_CFR_BUILD_TESTS "Should the tests for Deep-MW-CFR be built" ON)
 
 add_subdirectory(src)
 

@@ -1,3 +1,23 @@
-target_sources(deep_vr_mccfr
-  PRIVATE
-  ${CMAKE_CURRENT_LIST_DIR}/empty.cpp)
+file(GLOB DEEP_MW_CFR_HEADERS CONFIGURE_DEPENDS "${PROJECT_SOURCE_DIR}/include/*.hpp")
+
+add_library(deep_mw_cfr STATIC
+  deep_mw_cfr.cpp
+  ${DEEP_MW_CFR_HEADERS}
+)
+add_library(deep_mw_cfr::deep_mw_cfr ALIAS deep_mw_cfr)
+target_compile_features(deep_mw_cfr PRIVATE cxx_std_20)
+target_compile_options(deep_mw_cfr PRIVATE -Wall -Wextra -Wunreachable-code)
+
+target_include_directories(deep_mw_cfr
+  PUBLIC
+  $<INSTALL_INTERFACE:include>
+  $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
+  ${PROJECT_SOURCE_DIR}/extern/open-spiel/open_spiel
+  ${TORCH_INCLUDE_DIRS})
+
+target_link_libraries(deep_mw_cfr
+  PUBLIC
+  ${TORCH_LIBRARIES}
+  ${OPEN_SPIEL_OBJECTS}
+  # Boost::filesystem
+  range-v3)
