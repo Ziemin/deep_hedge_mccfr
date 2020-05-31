@@ -54,9 +54,9 @@ add_subdirectory(extern/open-spiel/open_spiel EXCLUDE_FROM_ALL)
 
 # set(CMAKE_CXX_CPPCHECK "cppcheck")
 
-option(DEEP_MW_CFR_BUILD_TESTS "Should the tests for Deep-MW-CFR be built" ON)
-
 add_subdirectory(src)
+add_subdirectory(app)
 
+option(DEEP_MW_CFR_BUILD_TESTS "Should the tests for Deep-MW-CFR be built" ON)
 enable_testing()
 # add_subdirectory(tests)

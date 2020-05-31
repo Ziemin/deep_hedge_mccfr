@@ -1,7 +1,10 @@
-#include <deep_mw_cfr.h>
+#include <dmc/deep_mw_cfr.hpp>
+#include <open_spiel/spiel.h>
 #include <range/v3/all.hpp>
 #include <torch/torch.h>
 
-torch::Tensor some_fun() {
-  return torch::eye(10);
-}
+namespace dmc {
+
+torch::Tensor some_fun() { return torch::eye(10); }
+
+} // namespace dmc

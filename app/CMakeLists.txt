@@ -1,0 +1,2 @@
+add_executable(dmc_example dmc_example.cpp)
+target_link_libraries(dmc_example deep_mw_cfr)
