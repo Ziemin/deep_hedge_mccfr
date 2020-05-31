@@ -7,3 +7,6 @@
 [submodule "extern/open-spiel"]
 	path = extern/open-spiel
 	url = https://github.com/deepmind/open_spiel
+[submodule "extern/fmt"]
+	path = extern/fmt
+	url = https://github.com/fmtlib/fmt

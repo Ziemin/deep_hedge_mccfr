@@ -24,6 +24,9 @@ add_subdirectory(extern/Catch2 EXCLUDE_FROM_ALL)
 # Ranges
 add_subdirectory(extern/range-v3 EXCLUDE_FROM_ALL)
 
+# FMT
+add_subdirectory(extern/fmt EXCLUDE_FROM_ALL)
+
 # Open-Spiel
 option(BUILD_WITH_HANABI "Should Hanabi be downloaded and built" ON)
 option(BUILD_WITH_ACPC "Should ACPC be downloaded and built" ON)
@@ -43,6 +46,23 @@ if (NOT OPEN_SPIEL_DEPS EQUAL "0")
   message(FATAL_ERROR "./scripts/initialize_open_spiel.sh failed")
 endif ()
 add_subdirectory(extern/open-spiel/open_spiel EXCLUDE_FROM_ALL)
+
+set (OPEN_SPIEL_OBJECTS
+  $<TARGET_OBJECTS:open_spiel_core>
+  $<TARGET_OBJECTS:games>
+  $<TARGET_OBJECTS:game_transforms>
+  $<TARGET_OBJECTS:open_spiel_query>
+  $<TARGET_OBJECTS:bridge_double_dummy_solver>
+  $<TARGET_OBJECTS:algorithms>
+  $<TARGET_OBJECTS:utils>
+  )
+if (BUILD_WITH_HANABI)
+  set(OPEN_SPIEL_OBJECTS ${OPEN_SPIEL_OBJECTS} $<TARGET_OBJECTS:hanabi_learning_environment>)
+endif()
+if (BUILD_WITH_ACPC)
+  set(OPEN_SPIEL_OBJECTS ${OPEN_SPIEL_OBJECTS} $<TARGET_OBJECTS:universal_poker_clib> $<TARGET_OBJECTS:universal_poker_lib>)
+endif()
+
 
 ###############################################################
 

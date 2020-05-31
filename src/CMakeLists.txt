@@ -6,6 +6,7 @@ add_library(
   STATIC
   ${DEEP_MW_CFR_SOURCES}
   ${DEEP_MW_CFR_HEADERS}
+  ${OPEN_SPIEL_OBJECTS}
 )
 add_library(deep_mw_cfr::deep_mw_cfr ALIAS deep_mw_cfr)
 target_compile_features(deep_mw_cfr PUBLIC cxx_std_20)
@@ -26,6 +27,15 @@ target_include_directories(
 target_link_libraries(deep_mw_cfr
   PUBLIC
   ${TORCH_LIBRARIES}
-  ${OPEN_SPIEL_OBJECTS}
   # Boost::filesystem
-  range-v3)
+  fmt::fmt
+  range-v3
+  absl::container
+  absl::flags
+  absl::flags_parse
+  absl::random_random
+  absl::flat_hash_map
+  absl::optional
+  absl::str_format
+  absl::strings
+  absl::time)
