@@ -147,6 +147,7 @@ template <> struct formatter<open_spiel::State> {
 
     if (state.IsTerminal()) {
       it = format_to(it, "Type: Terminal");
+      it = format_to(it, "Players Returns:\n{}\n", state.Returns());
       return it;
     }
 
