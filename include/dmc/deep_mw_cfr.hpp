@@ -13,6 +13,7 @@ torch::Tensor some_fun();
 
 using LRSchedule = std::function<double(uint64_t)>;
 
+
 struct SolverSpec {
   static inline constexpr double DEFAULT_EPSILON = 0.1;
   static inline constexpr double DEFAULT_PLAYER_TRAVERSALS = 1;
