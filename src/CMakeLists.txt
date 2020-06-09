@@ -10,7 +10,7 @@ add_library(
 )
 add_library(deep_mw_cfr::deep_mw_cfr ALIAS deep_mw_cfr)
 target_compile_features(deep_mw_cfr PUBLIC cxx_std_20)
-target_compile_options(deep_mw_cfr PRIVATE -Wall -Wextra -Wunreachable-code PUBLIC -fconcepts)
+target_compile_options(deep_mw_cfr PRIVATE -Wall -Wextra -Wunreachable-code)
 
 target_include_directories(
   deep_mw_cfr
