@@ -9,6 +9,7 @@
 #include <fmt/ranges.h>
 #include <functional>
 #include <memory>
+#include <open_spiel/policy.h>
 #include <open_spiel/spiel.h>
 #include <range/v3/all.hpp>
 #include <torch/torch.h>
@@ -43,9 +44,10 @@ struct SolverSpec {
 };
 
 struct SolverState {
-  uint64_t step = 0;
+  uint64_t step = 0, time = 0;
   std::vector<torch::optim::SGD> player_opts;
   std::vector<torch::optim::SGD> baseline_opts;
+  std::vector<open_spiel::TabularPolicy> avg_policies;
 };
 
 struct NoBaseline {
@@ -79,10 +81,12 @@ public:
 
   DeepMwCfrSolver(SolverSpec spec, std::vector<PlayerNetPtr> player_nets,
                   FeaturesBuilder features_builder,
-                  std::vector<BaselineNetPtr> baseline_nets = {})
+                  std::vector<BaselineNetPtr> baseline_nets = {},
+                  bool update_tabular_policy = true)
       : spec_(std::move(spec)), player_nets_(std::move(player_nets)),
         baseline_nets_(std::move(baseline_nets)),
-        features_builder_(std::move(features_builder)), rng_(spec_.seed) {
+        features_builder_(std::move(features_builder)), rng_(spec_.seed),
+        update_tabular_policy_(update_tabular_policy) {
 
     static_assert(
         std::is_same<FeaturesType,
@@ -123,6 +127,12 @@ public:
                                          opt_config);
       }
     }
+    if (update_tabular_policy_) {
+      for (open_spiel::Player p{0}; p < spec_.game->NumPlayers(); p++) {
+        state.avg_policies.emplace_back(*spec_.game);
+      }
+    }
+
     return state;
   }
 
@@ -134,6 +144,7 @@ public:
       for (BaselineNetPtr &baseline_ptr : baseline_nets_)
         baseline_ptr->eval();
 
+    const uint32_t start_time = state.time;
     for (open_spiel::Player player{0}; player < spec_.game->NumPlayers();
          player++) {
 
@@ -143,12 +154,13 @@ public:
       // collect traversals
       for (uint32_t traversal = 0; traversal < spec_.player_traversals;
            traversal++) {
+        state.time = start_time + traversal + 1;
         auto init_state = spec_.game->NewInitialState();
         // no gradients required during traversals
         torch::NoGradGuard no_grad;
 
         traverse(player, *init_state, 1.0, 1.0, strategy_memory_buffer,
-                 utility_memory_buffer);
+                 utility_memory_buffer, state);
       }
 
       // update networks
@@ -158,20 +170,22 @@ public:
       }
     }
     state.step++;
+    state.time = start_time + spec_.player_traversals;
   }
 
 private:
   double traverse(open_spiel::Player player, open_spiel::State &state,
                   double player_reach_prob, double others_reach_prob,
                   std::vector<ValueExample> &strategy_memory_buffer,
-                  std::vector<UtilityExample> &utility_memory_buffer) {
+                  std::vector<UtilityExample> &utility_memory_buffer,
+                  SolverState &solver_state) {
     if (state.IsTerminal()) {
       return state.PlayerReturn(player);
     }
 
     // get observation state representation
     const FeaturesType obs_features =
-      features_builder_.build(state.ObservationTensor(player), spec_.device);
+        features_builder_.build(state.ObservationTensor(player), spec_.device);
     const open_spiel::Player current_player = state.CurrentPlayer();
     const auto legal_actions = state.LegalActions(current_player);
 
@@ -201,6 +215,21 @@ private:
       }
     }();
 
+    // update average policy
+    if (current_player == player && update_tabular_policy_) {
+      auto &policy_table = solver_state.avg_policies[player].PolicyTable();
+      auto &state_policy = policy_table[state.InformationStateString(player)];
+      for (size_t act_ind = 0; act_ind < state_policy.size(); act_ind++) {
+        auto [action, prev_prob] = state_policy[act_ind];
+        double new_prob = strategy_probs[act_ind];
+        if (solver_state.time > 1) {
+          double time_d = solver_state.time;
+          new_prob = (time_d - 1.0) * prev_prob / time_d + new_prob / time_d;
+        }
+        state_policy[act_ind] = {action, new_prob};
+      }
+    }
+
     const auto [chosen_action, sample_action_prob] = open_spiel::SampleAction(
         utils::to_actions_and_probs(legal_actions, sampling_probs), rng_);
     const uint32_t action_ind =
@@ -218,7 +247,7 @@ private:
                                  : player_reach_prob,
         player != current_player ? others_reach_prob * strategy_action_prob
                                  : others_reach_prob,
-        strategy_memory_buffer, utility_memory_buffer);
+        strategy_memory_buffer, utility_memory_buffer, solver_state);
 
     // update utility memory buffer
     if (current_player != open_spiel::kChancePlayerId) {
@@ -306,7 +335,8 @@ private:
         values_data.push_back(example.target);
       }
       player_net.zero_grad();
-      FeaturesType features = features_builder_.batch(features_data).to(spec_.device);
+      FeaturesType features =
+          features_builder_.batch(features_data).to(spec_.device);
       torch::Tensor values =
           torch::stack(values_data).toType(torch::kFloat32).to(spec_.device);
 
@@ -319,7 +349,6 @@ private:
       update_mult.requires_grad_(false);
 
       torch::Tensor loss = -update_mult.mm(logits.t()).mean();
-      fmt::print("Loss {}\n", loss);
       loss.backward();
       optimizer.step();
 
@@ -327,8 +356,8 @@ private:
       batch_count += 1.0;
     }
 
-    fmt::print("Step {}, strategy loss for player {} = {}\n", state.step,
-               player, cumulative_loss / batch_count);
+    // fmt::print("Step {}, strategy loss for player {} = {}\n", state.step,
+    //            player, cumulative_loss / batch_count);
 
     player_net.eval();
   }
@@ -368,7 +397,8 @@ private:
       }
       baseline_net.zero_grad();
 
-      FeaturesType features = features_builder_.batch(features_data).to(spec_.device);
+      FeaturesType features =
+          features_builder_.batch(features_data).to(spec_.device);
       torch::Tensor batch_inds =
           torch::arange((int64_t)features_data.size(), spec_.device);
       torch::Tensor action_inds = torch::tensor(
@@ -392,7 +422,8 @@ private:
       cumulative_loss += loss.item<double>();
       batch_count += 1;
     }
-    fmt::print("Step {}, baseline loss for player {} = {}\n", state.step, player, cumulative_loss / batch_count);
+    // fmt::print("Step {}, baseline loss for player {} = {}\n", state.step,
+               // player, cumulative_loss / batch_count);
 
     baseline_net.eval();
   }
@@ -403,6 +434,7 @@ private:
   std::vector<BaselineNetPtr> baseline_nets_;
   FeaturesBuilder features_builder_;
   std::mt19937 rng_;
+  bool update_tabular_policy_;
 };
 
 } // namespace dmc

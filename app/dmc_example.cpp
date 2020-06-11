@@ -1,5 +1,7 @@
 #include <dmc/deep_mw_cfr.hpp>
+#include <fmt/core.h>
 #include <memory>
+#include <open_spiel/algorithms/tabular_exploitability.h>
 #include <open_spiel/spiel.h>
 #include <unistd.h>
 #include <vector>
@@ -9,6 +11,7 @@
 #include <absl/flags/flag.h>
 #include <absl/flags/parse.h>
 
+
 ABSL_FLAG(std::string, game, "kuhn_poker", "The name of the game to play.");
 ABSL_FLAG(int, players, 2, "How many players in this game, 0 for default.");
 ABSL_FLAG(int, seed, 0, "Seed for the random number generator. 0 for auto.");
@@ -17,6 +20,8 @@ ABSL_FLAG(int, traversals, 10,
 ABSL_FLAG(int, iter, 1000, "Number of algorithm iterations");
 ABSL_FLAG(double, eta, 1.0, "Eta parameters");
 ABSL_FLAG(bool, use_mw_update, false, "Use multiplicative weights update");
+ABSL_FLAG(double, lr, 1e-3, "Learning rate");
+
 
 struct SimpleNet : torch::nn::Module {
   using FeaturesType = torch::Tensor;
@@ -94,7 +99,7 @@ int main(int argc, char **argv) {
   spec.seed = seed;
   spec.eta = absl::GetFlag(FLAGS_eta);
   spec.player_traversals = absl::GetFlag(FLAGS_traversals);
-  spec.lr_schedule = [](auto step) { return 1e-2; };
+  spec.lr_schedule = [](auto step) { return absl::GetFlag(FLAGS_lr); };
   spec.update_method = absl::GetFlag(FLAGS_use_mw_update)
                            ? dmc::UpdateMethod::MULTIPLICATIVE_WEIGHTS
                            : dmc::UpdateMethod::HEDGE;
@@ -103,8 +108,14 @@ int main(int argc, char **argv) {
                               FeaturesBuilder(), std::move(baselines));
 
   auto state = solver.init();
-  for (int i = 0; i < num_iterations; i++)
+  for (int i = 0; i < num_iterations; i++) {
     solver.run_iteration(state);
+    if (i % 10 == 0) {
+      const double exploitability =
+          open_spiel::algorithms::Exploitability(*game, state.avg_policies[0]);
+      fmt::print("Iteration {}: Exploitability = {}\n", i, exploitability);
+    }
+  }
 
   return 0;
 }
