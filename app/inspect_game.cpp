@@ -21,18 +21,20 @@ ABSL_FLAG(bool, print_legal_actions, false, "Print all legal actions");
 ABSL_FLAG(bool, print_string_reprs, false,
           "Print string state representations");
 ABSL_FLAG(bool, print_tensors, false, "Print tensor state representatins");
+ABSL_FLAG(bool, print_all_perspectives, false, "Print tensors and strings for every player");
 
 void generate_playthrough(const open_spiel::Game &game, int seed,
                           bool print_legal_actions, bool print_strings,
-                          bool print_tensors) {
+                          bool print_tensors, bool print_all_perspectives) {
   std::mt19937 rng(seed);
 
   std::unique_ptr<open_spiel::State> state = game.NewInitialState();
   std::string state_format_str =
-      fmt::format("\n--- State: --------------------------\n{{:{}{}{}}}\n",
+      fmt::format("\n--- State: --------------------------\n{{:{}{}{}{}}}\n",
                   print_legal_actions ? "a" : "",
                   print_strings ? "s" : "",
-                  print_tensors ? "t" : "");
+                  print_tensors ? "t" : "",
+                  print_all_perspectives ? "p" : "");
 
   while (!state->IsTerminal()) {
     fmt::print(state_format_str, *state);
@@ -101,7 +103,8 @@ int main(int argc, char **argv) {
     generate_playthrough(*game, seed == 0 ? time(0) : seed,
                          absl::GetFlag(FLAGS_print_legal_actions),
                          absl::GetFlag(FLAGS_print_string_reprs),
-                         absl::GetFlag(FLAGS_print_tensors));
+                         absl::GetFlag(FLAGS_print_tensors),
+                         absl::GetFlag(FLAGS_print_all_perspectives));
   }
 
   return 0;

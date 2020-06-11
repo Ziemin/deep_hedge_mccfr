@@ -118,6 +118,7 @@ template <> struct formatter<open_spiel::State> {
   bool print_legal_actions = false;
   bool print_string_repr = false;
   bool print_tensor_repr = false;
+  bool show_all_perspectives = false;
 
   constexpr auto parse(format_parse_context &ctx) {
     auto end = ctx.end();
@@ -129,6 +130,8 @@ template <> struct formatter<open_spiel::State> {
         print_string_repr = true;
       else if (*it == 't')
         print_tensor_repr = true;
+      else if (*it == 'p')
+        show_all_perspectives = true;
       else
         throw fmt::format_error(
             fmt::format("Unrecognized format char: {}", *it));
@@ -183,17 +186,62 @@ template <> struct formatter<open_spiel::State> {
       it = format_to(it, "Current Player: {}\n", player);
 
       if (print_string_repr) {
-        if (game_type.provides_information_state_string)
-          it = format_to(it, "Info State String:\n{}\n", state.InformationStateString(player));
-        if (game_type.provides_observation_string)
-          it = format_to(it, "Obervation String:\n{}\n", state.ObservationString(player));
+        if (game_type.provides_information_state_string) {
+          it = format_to(it, "Info State String For Current Player:\n{}\n",
+                         state.InformationStateString(player));
+          if (show_all_perspectives) {
+            for (auto other_player = open_spiel::Player{0}; other_player < game->NumPlayers(); other_player++) {
+              if (other_player == player) continue;
+              it = format_to(it, "Info State String For Player {}:\n{}\n",
+                             other_player,
+                             state.InformationStateString(other_player));
+            }
+          }
+        }
+        if (game_type.provides_observation_string) {
+          it = format_to(it, "Obervation String For Current Player:\n{}\n",
+                         state.ObservationString(player));
+          if (show_all_perspectives) {
+            for (auto other_player = open_spiel::Player{0};
+                 other_player < game->NumPlayers(); other_player++) {
+              if (other_player == player)
+                continue;
+              it = format_to(it, "Observation String For Player {}:\n{}\n",
+                             other_player,
+                             state.ObservationString(other_player));
+            }
+          }
+        }
       }
       if (print_tensor_repr) {
-        if (game_type.provides_information_state_tensor)
-          it = format_to(it, "Info State Tensor:\n{}\n", state.InformationStateTensor(player));
-        if (game_type.provides_observation_tensor)
-          it = format_to(it, "Observation Tensor:\n{}\n",
+        if (game_type.provides_information_state_tensor) {
+          it = format_to(it, "Info State Tensor For Current Player:\n{}\n",
+                         state.InformationStateTensor(player));
+          if (show_all_perspectives) {
+            for (auto other_player = open_spiel::Player{0};
+                 other_player < game->NumPlayers(); other_player++) {
+              if (other_player == player)
+                continue;
+              it = format_to(it, "Info State Tensor For Player {}:\n{}\n",
+                             other_player,
+                             state.InformationStateTensor(other_player));
+            }
+          }
+        }
+        if (game_type.provides_observation_tensor) {
+          it = format_to(it, "Observation Tensor For Current Player:\n{}\n",
                          state.ObservationTensor(player));
+          if (show_all_perspectives) {
+            for (auto other_player = open_spiel::Player{0};
+                 other_player < game->NumPlayers(); other_player++) {
+              if (other_player == player)
+                continue;
+              it = format_to(it, "Observation Tensor For Player {}:\n{}\n",
+                             other_player,
+                             state.ObservationTensor(other_player));
+            }
+          }
+        }
       }
 
       if (print_legal_actions) {
