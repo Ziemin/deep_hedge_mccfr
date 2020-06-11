@@ -297,6 +297,9 @@ private:
     std::vector<torch::Tensor> values_data;
     values_data.reserve(spec_.batch_size);
 
+    double cumulative_loss = 0.0;
+    double batch_count = 0.0;
+
     for (const auto &data_batch : *data_loader) {
       for (const auto &example : data_batch) {
         features_data.push_back(example.data);
@@ -319,7 +322,14 @@ private:
       fmt::print("Loss {}\n", loss);
       loss.backward();
       optimizer.step();
+
+      cumulative_loss += loss.item<double>();
+      batch_count += 1.0;
     }
+
+    fmt::print("Step {}, strategy loss for player {} = {}\n", state.step,
+               player, cumulative_loss / batch_count);
+
     player_net.eval();
   }
 
@@ -345,6 +355,9 @@ private:
     actions_data.reserve(spec_.batch_size);
     std::vector<double> utility_data;
     utility_data.reserve(spec_.batch_size);
+
+    double cumulative_loss = 0.0;
+    double batch_count = 0.0;
 
     for (const auto &data_batch : *data_loader) {
       // stack features and action indices
@@ -375,7 +388,11 @@ private:
       features_data.clear();
       actions_data.clear();
       utility_data.clear();
+
+      cumulative_loss += loss.item<double>();
+      batch_count += 1;
     }
+    fmt::print("Step {}, baseline loss for player {} = {}\n", state.step, player, cumulative_loss / batch_count);
 
     baseline_net.eval();
   }

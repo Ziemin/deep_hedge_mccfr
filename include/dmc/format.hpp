@@ -244,16 +244,17 @@ template <> struct formatter<open_spiel::State> {
         }
       }
 
-      if (print_legal_actions) {
-        it = format_to(it, "Legal Actions:\n");
-        auto actions = state.LegalActions(player);
-        auto action_strs_rng = actions | ranges::views::transform([&state](open_spiel::Action act) {
-              return state.ActionToString(state.CurrentPlayer(), act);
-            });
-        it = format_to(it, "{}\n", fmt::join(action_strs_rng, ", "));
-      }
-
     }
+    if (print_legal_actions) {
+      it = format_to(it, "Legal Actions:\n");
+      auto actions = state.LegalActions(player);
+      auto action_strs_rng =
+          actions | ranges::views::transform([&state](open_spiel::Action act) {
+            return state.ActionToString(state.CurrentPlayer(), act);
+          });
+      it = format_to(it, "{}\n", fmt::join(action_strs_rng, ", "));
+    }
+
     return it;
   }
 };
