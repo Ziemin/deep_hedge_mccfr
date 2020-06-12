@@ -21,13 +21,13 @@ struct StackedLinearNet : torch::nn::Module {
           torch::nn::LinearOptions(prev_units, out_units).bias(true));
       register_module(fmt::format("fc_{}", layer_num), fc);
       hidden_layers.push_back(fc);
-      torch::nn::init::xavier_uniform_(fc->weight);
+      torch::nn::init::xavier_normal_(fc->weight);
 
       prev_units = out_units;
       layer_num += 1;
     }
     register_module("fc_out", fc_out);
-    torch::nn::init::xavier_uniform_(fc_out->weight);
+    torch::nn::init::xavier_normal_(fc_out->weight);
   }
 
   torch::Tensor forward(torch::Tensor features) {

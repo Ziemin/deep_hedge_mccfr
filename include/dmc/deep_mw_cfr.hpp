@@ -121,7 +121,7 @@ public:
   SolverState init() const {
     SolverState state;
     auto opt_config = torch::optim::SGDOptions(spec_.lr_schedule(0))
-      .weight_decay(spec_.weight_decay);
+                          .weight_decay(spec_.weight_decay);
     for (const PlayerNetPtr &player_net : player_nets_) {
       state.player_opts.emplace_back(player_net->parameters(), opt_config);
     }
@@ -163,8 +163,11 @@ public:
         // no gradients required during traversals
         torch::NoGradGuard no_grad;
 
-        traverse(player, *init_state, 1.0, 1.0, strategy_memory_buffer,
+        // fmt::print("========== BEGIN ============\n");
+        // fmt::print("Player: {}\n", player);
+        traverse(player, *init_state, 1.0, 1.0, 1.0, strategy_memory_buffer,
                  utility_memory_buffer, state);
+        // fmt::print("\n");
       }
 
       // update networks
@@ -180,50 +183,52 @@ public:
 private:
   double traverse(open_spiel::Player player, open_spiel::State &state,
                   double player_reach_prob, double others_reach_prob,
+                  double sample_reach_prob,
                   std::vector<ValueExample> &strategy_memory_buffer,
                   std::vector<UtilityExample> &utility_memory_buffer,
                   SolverState &solver_state) {
     if (state.IsTerminal()) {
       return state.PlayerReturn(player);
+    } else if (state.IsChanceNode()) {
+      auto chance_outcomes = state.ChanceOutcomes();
+      const auto [chosen_action, sample_action_prob] =
+          open_spiel::SampleAction(chance_outcomes, rng_);
+      state.ApplyAction(chosen_action);
+      return traverse(player, state, player_reach_prob,
+                      others_reach_prob * sample_action_prob,
+                      sample_reach_prob * sample_action_prob,
+                      strategy_memory_buffer, utility_memory_buffer,
+                      solver_state);
     }
 
-    // get observation state representation
-    const FeaturesType obs_features = features_builder_.build(
-        state.InformationStateTensor(player), spec_.device);
     const open_spiel::Player current_player = state.CurrentPlayer();
+    // get information state representation for the current player
+    const FeaturesType player_features = features_builder_.build(
+        state.InformationStateTensor(current_player), spec_.device);
+
     const auto legal_actions = state.LegalActions(current_player);
+    const auto legal_actions_mask =
+        torch::tensor(state.LegalActionsMask(current_player), torch::kDouble);
 
     // calculate strategy and sampling probabilities
-    const auto [strategy_probs, sampling_probs] = [&]() {
-      if (current_player == open_spiel::kChancePlayerId) {
-        auto chance_outcomes = state.ChanceOutcomes();
-        auto probs = chance_outcomes |
-                     ranges::views::transform(
-                         [](auto act_prob) { return act_prob.second; }) |
-                     ranges::to<std::vector>();
-        return std::make_pair(probs, probs);
-      } else {
-        PlayerNet &player_net = *player_nets_[current_player];
-        auto logits = player_net.forward(features_builder_.batch(obs_features))
-                          .reshape({-1})
-                          .toType(torch::kDouble)
-                          .to(torch::kCPU);
-        auto strategy_probs = utils::get_probabilities(legal_actions, logits);
-        const double epsilon = spec_.epsilon;
-        const double act_count = legal_actions.size();
-        auto sampling_probs =
-            epsilon / act_count + (1.0 - epsilon) * strategy_probs;
+    PlayerNet &player_net = *player_nets_[current_player];
+    auto logits = legal_actions_mask *
+                  player_net.forward(features_builder_.batch(player_features))
+                      .reshape({-1})
+                      .toType(torch::kDouble)
+                      .to(torch::kCPU);
 
-        return std::make_pair(utils::to_vector<double>(strategy_probs),
-                              utils::to_vector<double>(sampling_probs));
-      }
-    }();
-
-    // update average policy
-    if (current_player == player && update_tabular_policy_) {
-      solver_state.avg_policies[player].UpdateStatePolicy(
-          state.InformationStateString(player), strategy_probs);
+    auto strategy_probs_tensor =
+        utils::get_probabilities(legal_actions, logits);
+    const double epsilon = spec_.epsilon;
+    const double act_count = legal_actions.size();
+    auto sampling_probs_tensor = strategy_probs_tensor;
+    if (current_player == player) {
+      sampling_probs_tensor =
+          epsilon / act_count + (1.0 - epsilon) * strategy_probs_tensor;
     }
+    auto strategy_probs = utils::to_vector<double>(strategy_probs_tensor);
+    auto sampling_probs = utils::to_vector<double>(sampling_probs_tensor);
 
     const auto [chosen_action, sample_action_prob] = open_spiel::SampleAction(
         utils::to_actions_and_probs(legal_actions, sampling_probs), rng_);
@@ -231,6 +236,13 @@ private:
         ranges::distance(ranges::begin(legal_actions),
                          ranges::find(legal_actions, chosen_action));
     const double strategy_action_prob = strategy_probs[action_ind];
+
+    // update average policy
+    if (current_player == player && update_tabular_policy_) {
+      solver_state.avg_policies[player].UpdateStatePolicy(
+          state.InformationStateString(player), strategy_probs,
+          player_reach_prob, sample_reach_prob);
+    }
 
     // NOTE: apply action to the state - it's modified so it should not be used
     // again in this function
@@ -242,41 +254,34 @@ private:
                                  : player_reach_prob,
         player != current_player ? others_reach_prob * strategy_action_prob
                                  : others_reach_prob,
-        strategy_memory_buffer, utility_memory_buffer, solver_state);
+        sample_reach_prob * sample_action_prob,
+        strategy_memory_buffer,
+        utility_memory_buffer, solver_state);
 
     // update utility memory buffer
-    if (current_player != open_spiel::kChancePlayerId) {
+    if (current_player == player && has_baseline) {
       utility_memory_buffer.emplace_back(
-          std::make_tuple(obs_features.to(torch::kCPU), chosen_action),
+          std::make_tuple(player_features.to(torch::kCPU), chosen_action),
           subgame_utility);
     }
 
     // caculate estimated baselines
     const torch::Tensor exp_utilities = [&]() {
-      // NOTE we're not using baselines for chance nodes, due to their different
-      // action spaces we'd have to use a separate network for chance node
-      // actions
       if constexpr (has_baseline) {
-        if (current_player == open_spiel::kChancePlayerId) {
-          return torch::zeros({spec_.game->MaxChanceOutcomes()},
-                              torch::kDouble);
-        } else {
-          BaselineNet &baseline_net = *baseline_nets_[player];
-          return baseline_net.forward(obs_features)
-              .reshape({-1})
-              .toType(torch::kDouble)
-              .to(torch::kCPU);
-        }
+          if (current_player == player) {
+            BaselineNet &baseline_net = *baseline_nets_[player];
+            return legal_actions_mask * baseline_net.forward(player_features)
+                                            .reshape({-1})
+                                            .toType(torch::kDouble)
+                                            .to(torch::kCPU);
+          } else {
+            return torch::zeros({spec_.game->NumDistinctActions()}, torch::kDouble);
+          }
       } else {
-        if (current_player == open_spiel::kChancePlayerId) {
-          return torch::zeros({spec_.game->MaxChanceOutcomes()},
-                              torch::kDouble);
-        } else {
-          return torch::zeros({spec_.game->NumDistinctActions()},
-                              torch::kDouble);
-        }
+        return torch::zeros({spec_.game->NumDistinctActions()}, torch::kDouble);
       }
     }();
+
     // calculate baseline-enhanced sampled utilities
     exp_utilities.index({chosen_action}) +=
         (subgame_utility - exp_utilities.index({chosen_action})) /
@@ -291,9 +296,9 @@ private:
     // calculate baseline corrected sampled value for the trained player
     if (current_player == player) {
       torch::Tensor sampled_value =
-          others_reach_prob * exp_utilities / player_reach_prob;
+          others_reach_prob * exp_utilities / sample_reach_prob;
       // update strategy memory buffer
-      strategy_memory_buffer.emplace_back(obs_features.to(torch::kCPU),
+      strategy_memory_buffer.emplace_back(player_features.to(torch::kCPU),
                                           sampled_value.to(torch::kCPU));
     }
 

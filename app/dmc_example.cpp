@@ -20,9 +20,11 @@ ABSL_FLAG(int, traversals, 10,
           "Number of individual player traversals before the updates");
 ABSL_FLAG(int, iter, 1000, "Number of algorithm iterations");
 ABSL_FLAG(double, eta, 1.0, "Eta parameters");
+ABSL_FLAG(double, epsi, 0.1, "Epsilon for sampling policy");
 ABSL_FLAG(bool, use_mw_update, false, "Use multiplicative weights update");
 ABSL_FLAG(double, lr, 1e-3, "Learning rate");
 ABSL_FLAG(double, wd, 1e-2, "Weight Decays");
+ABSL_FLAG(int, units_factor, 4, "Unit layers factor");
 
 int main(int argc, char **argv) {
   absl::ParseCommandLine(argc, argv);
@@ -43,7 +45,11 @@ int main(int argc, char **argv) {
   if (torch::cuda::is_available())
     device = torch::Device(torch::kCUDA);
 
-  std::array<uint32_t, 2> hidden_units{32, 64};
+  const int units_factor = absl::GetFlag(FLAGS_units_factor);
+  std::array<uint32_t, 2> hidden_units;
+  hidden_units[0] = units_factor * 8;
+  hidden_units[1] = units_factor * 16;
+
   std::vector<std::shared_ptr<dmc::nets::StackedLinearNet>> players;
   std::vector<std::shared_ptr<dmc::nets::StackedLinearNet>> baselines;
   for (int p = 0; p < p_count; p++) {
@@ -60,6 +66,7 @@ int main(int argc, char **argv) {
 
   dmc::SolverSpec spec{game, device};
   spec.seed = seed;
+  spec.epsilon = absl::GetFlag(FLAGS_epsi);
   spec.eta = absl::GetFlag(FLAGS_eta);
   spec.player_traversals = absl::GetFlag(FLAGS_traversals);
   spec.lr_schedule = [](auto step) { return absl::GetFlag(FLAGS_lr); };
@@ -69,7 +76,7 @@ int main(int argc, char **argv) {
   spec.weight_decay = absl::GetFlag(FLAGS_wd);
 
   dmc::DeepMwCfrSolver solver(std::move(spec), std::move(players),
-                              dmc::features::RawInfoStateBuilder());
+                              dmc::features::RawInfoStateBuilder(), std::move(baselines));
 
   auto state = solver.init();
   for (int i = 0; i < num_iterations; i++) {

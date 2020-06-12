@@ -10,7 +10,8 @@ public:
       : open_spiel::TabularPolicy(game) {}
   AvgTabularPolicy(const AvgTabularPolicy &other) = default;
 
-  open_spiel::ActionsAndProbs GetStatePolicy(const std::string &info_state) const override {
+  open_spiel::ActionsAndProbs
+  GetStatePolicy(const std::string &info_state) const override {
     auto &policy_table = PolicyTable();
     auto iter = policy_table.find(info_state);
     if (iter == policy_table.end()) {
@@ -28,14 +29,15 @@ public:
   }
 
   void UpdateStatePolicy(const std::string &info_state,
-                         const std::vector<double>& latest_probs) {
+                         const std::vector<double> &latest_probs,
+                         double player_reach_prob, double sample_reach_prob) {
     auto &state_policy = PolicyTable()[info_state];
     if (state_policy.size() != latest_probs.size()) {
       open_spiel::SpielFatalError(
           "Policy to be updated has different size than the latest policy");
     }
     for (size_t ind = 0; ind < state_policy.size(); ind++) {
-      state_policy[ind].second += latest_probs[ind];
+      state_policy[ind].second += player_reach_prob * latest_probs[ind] / sample_reach_prob;
     }
   }
 };
