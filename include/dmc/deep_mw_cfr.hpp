@@ -1,8 +1,7 @@
 #pragma once
 
-#include <dmc/baseline.hpp>
 #include <dmc/datasets.hpp>
-#include <dmc/player.hpp>
+#include <dmc/policy.hpp>
 #include <dmc/utils.hpp>
 #include <fmt/core.h>
 #include <fmt/ostream.h>
@@ -31,6 +30,8 @@ struct SolverSpec {
   }
   static inline constexpr UpdateMethod DEFAULT_UPDATE = UpdateMethod::HEDGE;
   static inline constexpr size_t DEFAULT_BATCH_SIZE = 64;
+  static inline constexpr double DEFAULT_LOGITS_THRESHOLD = 2.0;
+  static inline constexpr double DEFAULT_WEIGHT_DECAY = 0.01;
 
   std::shared_ptr<const open_spiel::Game> game;
   torch::Device device;
@@ -40,6 +41,8 @@ struct SolverSpec {
   uint32_t player_traversals = DEFAULT_PLAYER_TRAVERSALS;
   UpdateMethod update_method = DEFAULT_UPDATE;
   size_t batch_size = DEFAULT_BATCH_SIZE;
+  double logits_threshold = DEFAULT_LOGITS_THRESHOLD;
+  double weight_decay = DEFAULT_WEIGHT_DECAY;
   int seed = 0;
 };
 
@@ -47,7 +50,7 @@ struct SolverState {
   uint64_t step = 0, time = 0;
   std::vector<torch::optim::SGD> player_opts;
   std::vector<torch::optim::SGD> baseline_opts;
-  std::vector<open_spiel::TabularPolicy> avg_policies;
+  std::vector<AvgTabularPolicy> avg_policies;
 };
 
 struct NoBaseline {
@@ -117,7 +120,8 @@ public:
 
   SolverState init() const {
     SolverState state;
-    torch::optim::SGDOptions opt_config(spec_.lr_schedule(0));
+    auto opt_config = torch::optim::SGDOptions(spec_.lr_schedule(0))
+      .weight_decay(spec_.weight_decay);
     for (const PlayerNetPtr &player_net : player_nets_) {
       state.player_opts.emplace_back(player_net->parameters(), opt_config);
     }
@@ -184,8 +188,8 @@ private:
     }
 
     // get observation state representation
-    const FeaturesType obs_features =
-        features_builder_.build(state.ObservationTensor(player), spec_.device);
+    const FeaturesType obs_features = features_builder_.build(
+        state.InformationStateTensor(player), spec_.device);
     const open_spiel::Player current_player = state.CurrentPlayer();
     const auto legal_actions = state.LegalActions(current_player);
 
@@ -217,17 +221,8 @@ private:
 
     // update average policy
     if (current_player == player && update_tabular_policy_) {
-      auto &policy_table = solver_state.avg_policies[player].PolicyTable();
-      auto &state_policy = policy_table[state.InformationStateString(player)];
-      for (size_t act_ind = 0; act_ind < state_policy.size(); act_ind++) {
-        auto [action, prev_prob] = state_policy[act_ind];
-        double new_prob = strategy_probs[act_ind];
-        if (solver_state.time > 1) {
-          double time_d = solver_state.time;
-          new_prob = (time_d - 1.0) * prev_prob / time_d + new_prob / time_d;
-        }
-        state_policy[act_ind] = {action, new_prob};
-      }
+      solver_state.avg_policies[player].UpdateStatePolicy(
+          state.InformationStateString(player), strategy_probs);
     }
 
     const auto [chosen_action, sample_action_prob] = open_spiel::SampleAction(
@@ -329,35 +324,51 @@ private:
     double cumulative_loss = 0.0;
     double batch_count = 0.0;
 
+    torch::Tensor zero = torch::zeros(
+        {}, torch::TensorOptions().dtype(torch::kFloat32).device(spec_.device));
+
     for (const auto &data_batch : *data_loader) {
       for (const auto &example : data_batch) {
         features_data.push_back(example.data);
         values_data.push_back(example.target);
       }
-      player_net.zero_grad();
+      optimizer.zero_grad();
       FeaturesType features =
           features_builder_.batch(features_data).to(spec_.device);
       torch::Tensor values =
+          spec_.eta *
           torch::stack(values_data).toType(torch::kFloat32).to(spec_.device);
 
       torch::Tensor logits = player_net.forward(features);
+      // center logits around mean
+      logits = logits - logits.mean(-1, /*keepdim=*/true);
 
-      torch::Tensor update_mult = spec_.eta * values;
       if (spec_.update_method == UpdateMethod::MULTIPLICATIVE_WEIGHTS) {
-        update_mult = torch::log(1.0 + update_mult);
+        values = torch::log(1.0 + values);
       }
-      update_mult.requires_grad_(false);
+      values.requires_grad_(false);
 
-      torch::Tensor loss = -update_mult.mm(logits.t()).mean();
+      if (spec_.logits_threshold > 0.0) {
+        // logits will be increased for these actions
+        torch::Tensor pos_values = torch::max(values, zero);
+        // very large logits cannot be increased
+        torch::Tensor can_increase =
+            logits.le(spec_.logits_threshold).to(logits.dtype());
+        // logits will be decreased for these actions
+        torch::Tensor neg_values = torch::min(values, zero);
+        // very small logits cannot be decreased
+        torch::Tensor can_decrease =
+            logits.ge(-spec_.logits_threshold).to(logits.dtype());
+        values = neg_values * can_decrease + pos_values * can_increase;
+      }
+
+      torch::Tensor loss = -(values * logits).mean();
       loss.backward();
       optimizer.step();
 
       cumulative_loss += loss.item<double>();
       batch_count += 1.0;
     }
-
-    // fmt::print("Step {}, strategy loss for player {} = {}\n", state.step,
-    //            player, cumulative_loss / batch_count);
 
     player_net.eval();
   }
@@ -422,8 +433,6 @@ private:
       cumulative_loss += loss.item<double>();
       batch_count += 1;
     }
-    // fmt::print("Step {}, baseline loss for player {} = {}\n", state.step,
-               // player, cumulative_loss / batch_count);
 
     baseline_net.eval();
   }

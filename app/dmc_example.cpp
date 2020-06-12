@@ -1,4 +1,6 @@
 #include <dmc/deep_mw_cfr.hpp>
+#include <dmc/features.hpp>
+#include <dmc/nets.hpp>
 #include <fmt/core.h>
 #include <memory>
 #include <open_spiel/algorithms/tabular_exploitability.h>
@@ -11,7 +13,6 @@
 #include <absl/flags/flag.h>
 #include <absl/flags/parse.h>
 
-
 ABSL_FLAG(std::string, game, "kuhn_poker", "The name of the game to play.");
 ABSL_FLAG(int, players, 2, "How many players in this game, 0 for default.");
 ABSL_FLAG(int, seed, 0, "Seed for the random number generator. 0 for auto.");
@@ -21,47 +22,7 @@ ABSL_FLAG(int, iter, 1000, "Number of algorithm iterations");
 ABSL_FLAG(double, eta, 1.0, "Eta parameters");
 ABSL_FLAG(bool, use_mw_update, false, "Use multiplicative weights update");
 ABSL_FLAG(double, lr, 1e-3, "Learning rate");
-
-
-struct SimpleNet : torch::nn::Module {
-  using FeaturesType = torch::Tensor;
-
-  SimpleNet(uint32_t features_size, uint32_t actions_size)
-      : fc_1(features_size, 32), fc_2(32, 48), fc_3(48, 64),
-        fc_out(64, actions_size) {
-    register_module("fc_1", fc_1);
-    register_module("fc_2", fc_2);
-    register_module("fc_3", fc_3);
-    register_module("fc_out", fc_out);
-  }
-
-  torch::Tensor forward(torch::Tensor features) {
-    auto out = torch::relu(fc_1(features));
-    out = torch::relu(fc_2(out));
-    out = torch::relu(fc_3(out));
-    return fc_out(out);
-  }
-
-private:
-  torch::nn::Linear fc_1, fc_2, fc_3, fc_out;
-};
-
-struct FeaturesBuilder {
-
-  torch::Tensor build(const std::vector<double> &observation_tensor,
-                      const torch::Device &device) {
-    return torch::tensor(observation_tensor).to(device);
-  }
-
-  torch::Tensor batch(std::vector<torch::Tensor> examples) {
-    return torch::stack(examples, 0);
-  }
-
-  torch::Tensor batch(torch::Tensor example) {
-    using namespace torch::indexing;
-    return example.index({None, Slice{}});
-  }
-};
+ABSL_FLAG(double, wd, 1e-2, "Weight Decays");
 
 int main(int argc, char **argv) {
   absl::ParseCommandLine(argc, argv);
@@ -76,21 +37,23 @@ int main(int argc, char **argv) {
 
   auto game = open_spiel::LoadGame(game_name, params);
   auto actions_size = game->NumDistinctActions();
-  auto features_size = game->ObservationTensorSize();
+  auto features_size = game->InformationStateTensorSize();
 
   torch::Device device = torch::Device(torch::kCPU);
   if (torch::cuda::is_available())
     device = torch::Device(torch::kCUDA);
 
-  std::vector<std::shared_ptr<SimpleNet>> players;
-  std::vector<std::shared_ptr<SimpleNet>> baselines;
+  std::array<uint32_t, 2> hidden_units{32, 64};
+  std::vector<std::shared_ptr<dmc::nets::StackedLinearNet>> players;
+  std::vector<std::shared_ptr<dmc::nets::StackedLinearNet>> baselines;
   for (int p = 0; p < p_count; p++) {
-    auto player_net = std::make_shared<SimpleNet>(features_size, actions_size);
+    auto player_net = std::make_shared<dmc::nets::StackedLinearNet>(
+        features_size, actions_size, hidden_units);
     player_net->to(device);
     players.push_back(std::move(player_net));
 
-    auto baseline_net =
-        std::make_shared<SimpleNet>(features_size, actions_size);
+    auto baseline_net = std::make_shared<dmc::nets::StackedLinearNet>(
+        features_size, actions_size, hidden_units);
     baseline_net->to(device);
     baselines.push_back(std::move(baseline_net));
   }
@@ -103,9 +66,10 @@ int main(int argc, char **argv) {
   spec.update_method = absl::GetFlag(FLAGS_use_mw_update)
                            ? dmc::UpdateMethod::MULTIPLICATIVE_WEIGHTS
                            : dmc::UpdateMethod::HEDGE;
+  spec.weight_decay = absl::GetFlag(FLAGS_wd);
 
   dmc::DeepMwCfrSolver solver(std::move(spec), std::move(players),
-                              FeaturesBuilder(), std::move(baselines));
+                              dmc::features::RawInfoStateBuilder());
 
   auto state = solver.init();
   for (int i = 0; i < num_iterations; i++) {
