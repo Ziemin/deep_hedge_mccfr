@@ -76,14 +76,14 @@ int main(int argc, char **argv) {
   spec.weight_decay = absl::GetFlag(FLAGS_wd);
 
   dmc::DeepMwCfrSolver solver(std::move(spec), std::move(players),
-                              dmc::features::RawInfoStateBuilder(), std::move(baselines));
+                              dmc::features::RawInfoStateBuilder());
 
   auto state = solver.init();
   for (int i = 0; i < num_iterations; i++) {
     solver.run_iteration(state);
     if (i % 10 == 0) {
       const double exploitability =
-          open_spiel::algorithms::Exploitability(*game, state.avg_policies[0]);
+          open_spiel::algorithms::Exploitability(*game, state.avg_policy);
       fmt::print("Iteration {}: Exploitability = {}\n", i, exploitability);
     }
   }

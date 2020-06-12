@@ -47,10 +47,10 @@ struct SolverSpec {
 };
 
 struct SolverState {
+  AvgTabularPolicy avg_policy;
   uint64_t step = 0, time = 0;
   std::vector<torch::optim::SGD> player_opts;
   std::vector<torch::optim::SGD> baseline_opts;
-  std::vector<AvgTabularPolicy> avg_policies;
 };
 
 struct NoBaseline {
@@ -119,7 +119,7 @@ public:
   }
 
   SolverState init() const {
-    SolverState state;
+    SolverState state{AvgTabularPolicy(*spec_.game)};
     auto opt_config = torch::optim::SGDOptions(spec_.lr_schedule(0))
                           .weight_decay(spec_.weight_decay);
     for (const PlayerNetPtr &player_net : player_nets_) {
@@ -129,11 +129,6 @@ public:
       for (const BaselineNetPtr &baseline_net : baseline_nets_) {
         state.baseline_opts.emplace_back(baseline_net->parameters(),
                                          opt_config);
-      }
-    }
-    if (update_tabular_policy_) {
-      for (open_spiel::Player p{0}; p < spec_.game->NumPlayers(); p++) {
-        state.avg_policies.emplace_back(*spec_.game);
       }
     }
 
@@ -239,7 +234,7 @@ private:
 
     // update average policy
     if (current_player == player && update_tabular_policy_) {
-      solver_state.avg_policies[player].UpdateStatePolicy(
+      solver_state.avg_policy.UpdateStatePolicy(
           state.InformationStateString(player), strategy_probs,
           player_reach_prob, sample_reach_prob);
     }
