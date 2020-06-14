@@ -47,9 +47,10 @@ int main(int argc, char **argv) {
     device = torch::Device(torch::kCUDA);
 
   const int units_factor = absl::GetFlag(FLAGS_units_factor);
-  std::array<uint32_t, 2> hidden_units;
-  hidden_units[0] = units_factor * 8;
-  hidden_units[1] = units_factor * 16;
+  std::array<uint32_t, 3> hidden_units;
+  hidden_units[0] = units_factor * 12;
+  hidden_units[1] = units_factor * 12;
+  hidden_units[2] = units_factor * 16;
 
   std::vector<std::shared_ptr<dmc::nets::StackedLinearNet>> players;
   std::vector<std::shared_ptr<dmc::nets::StackedLinearNet>> baselines;
