@@ -10,6 +10,7 @@
 #include <memory>
 #include <open_spiel/policy.h>
 #include <open_spiel/spiel.h>
+#include <open_spiel/spiel_utils.h>
 #include <range/v3/all.hpp>
 #include <torch/torch.h>
 #include <tuple>
@@ -195,6 +196,7 @@ private:
                       strategy_memory_buffer, utility_memory_buffer,
                       solver_state);
     }
+    SPIEL_CHECK_PROB(sample_reach_prob);
 
     const open_spiel::Player current_player = state.CurrentPlayer();
     // get information state representation for the current player
@@ -245,7 +247,7 @@ private:
     // recursive call
     const double subgame_utility = traverse(
         player, state,
-        player == current_player ? player_reach_prob * sample_action_prob
+        player == current_player ? player_reach_prob * strategy_action_prob
                                  : player_reach_prob,
         player != current_player ? others_reach_prob * strategy_action_prob
                                  : others_reach_prob,

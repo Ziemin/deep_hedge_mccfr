@@ -25,6 +25,7 @@ ABSL_FLAG(bool, use_mw_update, false, "Use multiplicative weights update");
 ABSL_FLAG(double, lr, 1e-3, "Learning rate");
 ABSL_FLAG(double, wd, 1e-2, "Weight Decays");
 ABSL_FLAG(int, units_factor, 4, "Unit layers factor");
+ABSL_FLAG(double, threshold, 2.0, "Logits threshold cut-off");
 
 int main(int argc, char **argv) {
   absl::ParseCommandLine(argc, argv);
@@ -74,6 +75,7 @@ int main(int argc, char **argv) {
                            ? dmc::UpdateMethod::MULTIPLICATIVE_WEIGHTS
                            : dmc::UpdateMethod::HEDGE;
   spec.weight_decay = absl::GetFlag(FLAGS_wd);
+  spec.logits_threshold = absl::GetFlag(FLAGS_threshold);
 
   dmc::DeepMwCfrSolver solver(std::move(spec), std::move(players),
                               dmc::features::RawInfoStateBuilder());

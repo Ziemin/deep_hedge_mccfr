@@ -1,4 +1,7 @@
 #pragma once
+#include "open_spiel/spiel_utils.h"
+#include <cmath>
+#include <numeric>
 #include <open_spiel/policy.h>
 #include <open_spiel/spiel.h>
 
@@ -37,7 +40,10 @@ public:
           "Policy to be updated has different size than the latest policy");
     }
     for (size_t ind = 0; ind < state_policy.size(); ind++) {
-      state_policy[ind].second += player_reach_prob * latest_probs[ind] / sample_reach_prob;
+      double increment =
+          player_reach_prob * latest_probs[ind] / sample_reach_prob;
+      SPIEL_CHECK_FALSE(std::isnan(increment) || std::isinf(increment));
+      state_policy[ind].second += increment;
     }
   }
 };
