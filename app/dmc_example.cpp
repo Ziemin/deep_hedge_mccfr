@@ -23,6 +23,8 @@ ABSL_FLAG(double, eta, 1.0, "Eta parameters");
 ABSL_FLAG(double, epsi, 0.1, "Epsilon for sampling policy");
 ABSL_FLAG(bool, use_mw_update, false, "Use multiplicative weights update");
 ABSL_FLAG(double, lr, 1e-3, "Learning rate");
+ABSL_FLAG(double, baseline_lr, 0.0, "Baseline Learning rate");
+ABSL_FLAG(int, baseline_start, 0, "Step to start using baseline");
 ABSL_FLAG(double, wd, 1e-2, "Weight Decays");
 ABSL_FLAG(int, units_factor, 4, "Unit layers factor");
 ABSL_FLAG(double, threshold, 2.0, "Logits threshold cut-off");
@@ -71,7 +73,16 @@ int main(int argc, char **argv) {
   spec.epsilon = absl::GetFlag(FLAGS_epsi);
   spec.eta = absl::GetFlag(FLAGS_eta);
   spec.player_traversals = absl::GetFlag(FLAGS_traversals);
-  spec.lr_schedule = [](auto step) { return absl::GetFlag(FLAGS_lr); };
+  spec.player_lr_schedule = [](auto step) { return absl::GetFlag(FLAGS_lr); };
+  double baseline_lr = absl::GetFlag(FLAGS_baseline_lr);
+  if (baseline_lr  != 0.0) {
+    spec.baseline_lr_schedule = [](auto step) {
+      return absl::GetFlag(FLAGS_lr);
+    };
+  } else {
+    spec.baseline_lr_schedule = spec.player_lr_schedule;
+  }
+  spec.baseline_start_step = absl::GetFlag(FLAGS_baseline_start);
   spec.update_method = absl::GetFlag(FLAGS_use_mw_update)
                            ? dmc::UpdateMethod::MULTIPLICATIVE_WEIGHTS
                            : dmc::UpdateMethod::HEDGE;
@@ -79,7 +90,8 @@ int main(int argc, char **argv) {
   spec.logits_threshold = absl::GetFlag(FLAGS_threshold);
 
   dmc::DeepMwCfrSolver solver(std::move(spec), std::move(players),
-                              dmc::features::RawInfoStateBuilder());
+                              dmc::features::RawInfoStateBuilder(),
+                              std::move(baselines));
 
   auto state = solver.init();
   for (int i = 0; i < num_iterations; i++) {

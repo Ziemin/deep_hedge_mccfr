@@ -33,10 +33,12 @@ struct SolverSpec {
   static inline constexpr size_t DEFAULT_BATCH_SIZE = 64;
   static inline constexpr double DEFAULT_LOGITS_THRESHOLD = 2.0;
   static inline constexpr double DEFAULT_WEIGHT_DECAY = 0.01;
+  static inline constexpr uint64_t DEFAULT_BASELINE_START_STEP = 0;
 
   std::shared_ptr<const open_spiel::Game> game;
   torch::Device device;
-  LRSchedule lr_schedule = DEFAULT_LR_SCHEDULE;
+  LRSchedule player_lr_schedule = DEFAULT_LR_SCHEDULE;
+  LRSchedule baseline_lr_schedule = DEFAULT_LR_SCHEDULE;
   double epsilon = DEFAULT_EPSILON;
   double eta = DEFAULT_ETA;
   uint32_t player_traversals = DEFAULT_PLAYER_TRAVERSALS;
@@ -44,7 +46,9 @@ struct SolverSpec {
   size_t batch_size = DEFAULT_BATCH_SIZE;
   double logits_threshold = DEFAULT_LOGITS_THRESHOLD;
   double weight_decay = DEFAULT_WEIGHT_DECAY;
+  uint64_t baseline_start_step = DEFAULT_BASELINE_START_STEP;
   int seed = 0;
+
 };
 
 struct SolverState {
@@ -121,15 +125,17 @@ public:
 
   SolverState init() const {
     SolverState state{AvgTabularPolicy(*spec_.game)};
-    auto opt_config = torch::optim::SGDOptions(spec_.lr_schedule(0))
+    auto player_opt_config = torch::optim::SGDOptions(spec_.player_lr_schedule(0))
                           .weight_decay(spec_.weight_decay);
     for (const PlayerNetPtr &player_net : player_nets_) {
-      state.player_opts.emplace_back(player_net->parameters(), opt_config);
+      state.player_opts.emplace_back(player_net->parameters(), player_opt_config);
     }
     if constexpr (has_baseline) {
+      auto baseline_opt_config = torch::optim::SGDOptions(spec_.baseline_lr_schedule(0))
+                                   .weight_decay(spec_.weight_decay);
       for (const BaselineNetPtr &baseline_net : baseline_nets_) {
         state.baseline_opts.emplace_back(baseline_net->parameters(),
-                                         opt_config);
+                                         baseline_opt_config);
       }
     }
 
@@ -265,7 +271,7 @@ private:
     // caculate estimated baselines
     const torch::Tensor exp_utilities = [&]() {
       if constexpr (has_baseline) {
-          if (current_player == player) {
+          if (current_player == player && spec_.baseline_start_step <= solver_state.step) {
             BaselineNet &baseline_net = *baseline_nets_[player];
             return legal_actions_mask * baseline_net.forward(player_features)
                                             .reshape({-1})
@@ -313,7 +319,7 @@ private:
     // set learning rate
     torch::optim::SGDOptions &opt_config =
         dynamic_cast<torch::optim::SGDOptions &>(optimizer.defaults());
-    opt_config.lr(spec_.lr_schedule(state.step));
+    opt_config.lr(spec_.player_lr_schedule(state.step));
 
     PlayerNet &player_net = *player_nets_[player];
     player_net.train();
@@ -386,7 +392,7 @@ private:
     // set learning rate
     torch::optim::SGDOptions &opt_config =
         dynamic_cast<torch::optim::SGDOptions &>(optimizer.defaults());
-    opt_config.lr(spec_.lr_schedule(state.step));
+    opt_config.lr(spec_.baseline_lr_schedule(state.step));
 
     BaselineNet &baseline_net = *baseline_nets_[player];
     baseline_net.train();
