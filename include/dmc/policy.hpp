@@ -1,16 +1,22 @@
 #pragma once
-#include "open_spiel/spiel_utils.h"
+#include <open_spiel/spiel_utils.h>
 #include <cmath>
 #include <numeric>
+#include <unordered_map>
 #include <open_spiel/policy.h>
 #include <open_spiel/spiel.h>
+#include <vector>
 
 namespace dmc {
 
 class AvgTabularPolicy : public open_spiel::TabularPolicy {
 public:
   AvgTabularPolicy(const open_spiel::Game &game)
-      : open_spiel::TabularPolicy(game) {}
+      : open_spiel::TabularPolicy(game) {
+    for (const auto &[info_state, state_policy] : PolicyTable()) {
+      c_bits_[info_state] = std::vector<double>(state_policy.size(), 0.0);
+    }
+  }
   AvgTabularPolicy(const AvgTabularPolicy &other) = default;
 
   open_spiel::ActionsAndProbs
@@ -39,12 +45,24 @@ public:
       open_spiel::SpielFatalError(
           "Policy to be updated has different size than the latest policy");
     }
+    auto &state_bits = c_bits_[info_state];
+
     for (size_t ind = 0; ind < state_policy.size(); ind++) {
       double increment =
           player_reach_prob * latest_probs[ind] / sample_reach_prob;
+
       SPIEL_CHECK_FALSE(std::isnan(increment) || std::isinf(increment));
-      state_policy[ind].second += increment;
+
+      // Kahan summation algorithm
+      double y = increment - state_bits[ind];
+      double t = state_policy[ind].second + y;
+      state_bits[ind] = (t - state_policy[ind].second) - y;
+      state_policy[ind].second = t;
     }
   }
+
+private:
+  // lost bits for the Kahan summation algorithm
+  std::unordered_map<std::string, std::vector<double>> c_bits_;
 };
 } // namespace dmc
