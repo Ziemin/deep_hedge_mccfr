@@ -273,7 +273,7 @@ private:
       if constexpr (has_baseline) {
           if (current_player == player && spec_.baseline_start_step <= solver_state.step) {
             BaselineNet &baseline_net = *baseline_nets_[player];
-            return legal_actions_mask * baseline_net.forward(player_features)
+            return legal_actions_mask * baseline_net.forward(features_builder_.batch(player_features))
                                             .reshape({-1})
                                             .toType(torch::kDouble)
                                             .to(torch::kCPU);

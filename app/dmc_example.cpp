@@ -28,6 +28,7 @@ ABSL_FLAG(int, baseline_start, 0, "Step to start using baseline");
 ABSL_FLAG(double, wd, 1e-2, "Weight Decays");
 ABSL_FLAG(int, units_factor, 4, "Unit layers factor");
 ABSL_FLAG(double, threshold, 2.0, "Logits threshold cut-off");
+ABSL_FLAG(bool, on_cpu, false, "Use only cpu");
 
 int main(int argc, char **argv) {
   absl::ParseCommandLine(argc, argv);
@@ -45,7 +46,7 @@ int main(int argc, char **argv) {
   auto features_size = game->InformationStateTensorSize();
 
   torch::Device device = torch::Device(torch::kCPU);
-  if (torch::cuda::is_available())
+  if (torch::cuda::is_available() && !absl::GetFlag(FLAGS_on_cpu))
     device = torch::Device(torch::kCUDA);
 
   const int units_factor = absl::GetFlag(FLAGS_units_factor);
@@ -57,13 +58,11 @@ int main(int argc, char **argv) {
   std::vector<std::shared_ptr<dmc::nets::StackedLinearNet>> players;
   std::vector<std::shared_ptr<dmc::nets::StackedLinearNet>> baselines;
   for (int p = 0; p < p_count; p++) {
-    auto player_net = std::make_shared<dmc::nets::StackedLinearNet>(
-        features_size, actions_size, hidden_units);
+    auto player_net = std::make_shared<dmc::nets::StackedLinearNet>(features_size, actions_size, hidden_units, true);
     player_net->to(device);
     players.push_back(std::move(player_net));
 
-    auto baseline_net = std::make_shared<dmc::nets::StackedLinearNet>(
-        features_size, actions_size, hidden_units);
+    auto baseline_net = std::make_shared<dmc::nets::StackedLinearNet>(features_size, actions_size, hidden_units, true);
     baseline_net->to(device);
     baselines.push_back(std::move(baseline_net));
   }
@@ -96,7 +95,7 @@ int main(int argc, char **argv) {
   auto state = solver.init();
   for (int i = 0; i < num_iterations; i++) {
     solver.run_iteration(state);
-    if (i % 10 == 0) {
+    if (i % 100 == 0) {
       const double exploitability =
           open_spiel::algorithms::Exploitability(*game, state.avg_policy);
       fmt::print("Iteration {}: Exploitability = {}\n", i, exploitability);
