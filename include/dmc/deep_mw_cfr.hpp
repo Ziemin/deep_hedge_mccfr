@@ -58,14 +58,10 @@ struct SolverState {
   std::vector<torch::optim::SGD> baseline_opts;
 };
 
-struct NoBaseline {
-  using FeaturesType = void;
-};
 
-template <typename PlayerNet, typename FeaturesBuilder,
-          typename BaselineNet = NoBaseline>
+template <typename Net, typename FeaturesBuilder>
 class DeepMwCfrSolver {
-  using FeaturesType = typename PlayerNet::FeaturesType;
+  using FeaturesType = typename Net::FeaturesType;
 
   using ValueExample = torch::data::Example<FeaturesType, torch::Tensor>;
   using UtilityExample =
@@ -73,28 +69,20 @@ class DeepMwCfrSolver {
                            double>;
 
 public:
-  constexpr static bool has_baseline = !std::is_same<NoBaseline, BaselineNet>();
-  using PlayerNetPtr = std::shared_ptr<PlayerNet>;
-  using BaselineNetPtr = std::shared_ptr<BaselineNet>;
+  using NetPtr = std::shared_ptr<Net>;
 
-  static_assert(std::is_base_of<torch::nn::Module, PlayerNet>(),
-                "PlayerNet has to be torch::nn::Module");
-  static_assert(!has_baseline ||
-                    std::is_base_of<torch::nn::Module, BaselineNet>(),
-                "BaselineNet has to be torch::nn::Module");
-  static_assert(!has_baseline ||
-                    std::is_same<typename PlayerNet::FeaturesType,
-                                 typename BaselineNet::FeaturesType>(),
-                "Players and Baselines feature tyeps should be the same");
+  static_assert(std::is_base_of<torch::nn::Module, Net>(),
+                "Net has to be torch::nn::Module");
 
-  DeepMwCfrSolver(SolverSpec spec, std::vector<PlayerNetPtr> player_nets,
+  DeepMwCfrSolver(SolverSpec spec, std::vector<NetPtr> player_nets,
                   FeaturesBuilder features_builder,
-                  std::vector<BaselineNetPtr> baseline_nets = {},
+                  std::vector<NetPtr> baseline_nets = {},
                   bool update_tabular_policy = true)
-      : spec_(std::move(spec)), player_nets_(std::move(player_nets)),
-        baseline_nets_(std::move(baseline_nets)),
-        features_builder_(std::move(features_builder)), rng_(spec_.seed),
-        update_tabular_policy_(update_tabular_policy) {
+    : has_baseline(baseline_nets.size() > 0),
+      spec_(std::move(spec)), player_nets_(std::move(player_nets)),
+      baseline_nets_(std::move(baseline_nets)),
+      features_builder_(std::move(features_builder)), rng_(spec_.seed),
+      update_tabular_policy_(update_tabular_policy) {
 
     static_assert(
         std::is_same<FeaturesType,
@@ -127,13 +115,13 @@ public:
     SolverState state{AvgTabularPolicy(*spec_.game)};
     auto player_opt_config = torch::optim::SGDOptions(spec_.player_lr_schedule(0))
                           .weight_decay(spec_.weight_decay);
-    for (const PlayerNetPtr &player_net : player_nets_) {
+    for (const NetPtr &player_net : player_nets_) {
       state.player_opts.emplace_back(player_net->parameters(), player_opt_config);
     }
-    if constexpr (has_baseline) {
+    if (has_baseline) {
       auto baseline_opt_config = torch::optim::SGDOptions(spec_.baseline_lr_schedule(0))
                                    .weight_decay(spec_.weight_decay);
-      for (const BaselineNetPtr &baseline_net : baseline_nets_) {
+      for (const NetPtr &baseline_net : baseline_nets_) {
         state.baseline_opts.emplace_back(baseline_net->parameters(),
                                          baseline_opt_config);
       }
@@ -144,10 +132,10 @@ public:
 
   void run_iteration(SolverState &state) {
     // set networks to eval mode
-    for (PlayerNetPtr &player_ptr : player_nets_)
+    for (NetPtr &player_ptr : player_nets_)
       player_ptr->eval();
-    if constexpr (has_baseline)
-      for (BaselineNetPtr &baseline_ptr : baseline_nets_)
+    if (has_baseline)
+      for (NetPtr &baseline_ptr : baseline_nets_)
         baseline_ptr->eval();
 
     const uint32_t start_time = state.time;
@@ -174,7 +162,7 @@ public:
 
       // update networks
       update_player(player, {std::move(strategy_memory_buffer)}, state);
-      if constexpr (has_baseline) {
+      if (has_baseline) {
         update_baseline(player, {std::move(utility_memory_buffer)}, state);
       }
     }
@@ -214,7 +202,7 @@ private:
         torch::tensor(state.LegalActionsMask(current_player), torch::kDouble);
 
     // calculate strategy and sampling probabilities
-    PlayerNet &player_net = *player_nets_[current_player];
+    Net &player_net = *player_nets_[current_player];
     auto logits = legal_actions_mask *
                   player_net.forward(features_builder_.batch(player_features))
                       .reshape({-1})
@@ -270,16 +258,13 @@ private:
 
     // caculate estimated baselines
     const torch::Tensor exp_utilities = [&]() {
-      if constexpr (has_baseline) {
-          if (current_player == player && spec_.baseline_start_step <= solver_state.step) {
-            BaselineNet &baseline_net = *baseline_nets_[player];
-            return legal_actions_mask * baseline_net.forward(features_builder_.batch(player_features))
-                                            .reshape({-1})
-                                            .toType(torch::kDouble)
-                                            .to(torch::kCPU);
-          } else {
-            return torch::zeros({spec_.game->NumDistinctActions()}, torch::kDouble);
-          }
+      if (has_baseline && current_player == player && spec_.baseline_start_step <= solver_state.step) {
+          Net &baseline_net = *baseline_nets_[player];
+          return legal_actions_mask *
+                 baseline_net.forward(features_builder_.batch(player_features))
+                     .reshape({-1})
+                     .toType(torch::kDouble)
+                     .to(torch::kCPU);
       } else {
         return torch::zeros({spec_.game->NumDistinctActions()}, torch::kDouble);
       }
@@ -321,7 +306,7 @@ private:
         dynamic_cast<torch::optim::SGDOptions &>(optimizer.defaults());
     opt_config.lr(spec_.player_lr_schedule(state.step));
 
-    PlayerNet &player_net = *player_nets_[player];
+    Net &player_net = *player_nets_[player];
     player_net.train();
 
     std::vector<FeaturesType> features_data;
@@ -394,7 +379,7 @@ private:
         dynamic_cast<torch::optim::SGDOptions &>(optimizer.defaults());
     opt_config.lr(spec_.baseline_lr_schedule(state.step));
 
-    BaselineNet &baseline_net = *baseline_nets_[player];
+    Net &baseline_net = *baseline_nets_[player];
     baseline_net.train();
 
     std::vector<FeaturesType> features_data;
@@ -446,9 +431,10 @@ private:
   }
 
 private:
+  const bool has_baseline;
   const SolverSpec spec_;
-  std::vector<PlayerNetPtr> player_nets_;
-  std::vector<BaselineNetPtr> baseline_nets_;
+  std::vector<NetPtr> player_nets_;
+  std::vector<NetPtr> baseline_nets_;
   FeaturesBuilder features_builder_;
   std::mt19937 rng_;
   bool update_tabular_policy_;

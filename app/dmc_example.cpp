@@ -23,12 +23,14 @@ ABSL_FLAG(double, eta, 1.0, "Eta parameters");
 ABSL_FLAG(double, epsi, 0.1, "Epsilon for sampling policy");
 ABSL_FLAG(bool, use_mw_update, false, "Use multiplicative weights update");
 ABSL_FLAG(double, lr, 1e-3, "Learning rate");
+ABSL_FLAG(bool, without_baseline, false, "Do not use baseline");
 ABSL_FLAG(double, baseline_lr, 0.0, "Baseline Learning rate");
 ABSL_FLAG(int, baseline_start, 0, "Step to start using baseline");
 ABSL_FLAG(double, wd, 1e-2, "Weight Decays");
 ABSL_FLAG(int, units_factor, 4, "Unit layers factor");
 ABSL_FLAG(double, threshold, 2.0, "Logits threshold cut-off");
 ABSL_FLAG(bool, on_cpu, false, "Use only cpu");
+ABSL_FLAG(int, eval_freq, 100, "Strategy evaluation frequency");
 
 int main(int argc, char **argv) {
   absl::ParseCommandLine(argc, argv);
@@ -37,6 +39,7 @@ int main(int argc, char **argv) {
   const int num_iterations = absl::GetFlag(FLAGS_iter);
   int seed = absl::GetFlag(FLAGS_seed);
   seed = seed == 0 ? time(0) : seed;
+  const int eval_freq = absl::GetFlag(FLAGS_eval_freq);
 
   open_spiel::GameParameters params;
   params["players"] = open_spiel::GameParameter(p_count);
@@ -62,9 +65,12 @@ int main(int argc, char **argv) {
     player_net->to(device);
     players.push_back(std::move(player_net));
 
-    auto baseline_net = std::make_shared<dmc::nets::StackedLinearNet>(features_size, actions_size, hidden_units, true);
-    baseline_net->to(device);
-    baselines.push_back(std::move(baseline_net));
+    if (!absl::GetFlag(FLAGS_without_baseline)) {
+      auto baseline_net = std::make_shared<dmc::nets::StackedLinearNet>(
+          features_size, actions_size, hidden_units, true);
+      baseline_net->to(device);
+      baselines.push_back(std::move(baseline_net));
+    }
   }
 
   dmc::SolverSpec spec{game, device};
@@ -95,7 +101,7 @@ int main(int argc, char **argv) {
   auto state = solver.init();
   for (int i = 0; i < num_iterations; i++) {
     solver.run_iteration(state);
-    if (i % 100 == 0) {
+    if (i % eval_freq == 0) {
       const double exploitability =
           open_spiel::algorithms::Exploitability(*game, state.avg_policy);
       fmt::print("Iteration {}: Exploitability = {}\n", i, exploitability);
