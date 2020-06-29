@@ -47,6 +47,7 @@ struct SolverSpec {
   double logits_threshold = DEFAULT_LOGITS_THRESHOLD;
   double weight_decay = DEFAULT_WEIGHT_DECAY;
   uint64_t baseline_start_step = DEFAULT_BASELINE_START_STEP;
+  bool normalize_returns = false;
   int seed = 0;
 
 };
@@ -78,7 +79,7 @@ public:
                   FeaturesBuilder features_builder,
                   std::vector<NetPtr> baseline_nets = {},
                   bool update_tabular_policy = true)
-    : has_baseline(baseline_nets.size() > 0),
+    : has_baseline_(baseline_nets.size() > 0),
       spec_(std::move(spec)), player_nets_(std::move(player_nets)),
       baseline_nets_(std::move(baseline_nets)),
       features_builder_(std::move(features_builder)), rng_(spec_.seed),
@@ -95,7 +96,7 @@ public:
       throw std::invalid_argument(
           "There should be the a network for every player");
     }
-    if (has_baseline && baseline_nets_.size() != player_nets_.size()) {
+    if (has_baseline_ && baseline_nets_.size() != player_nets_.size()) {
       throw std::invalid_argument(
           "Baseline networks should be of the same size as player networks");
     }
@@ -109,6 +110,12 @@ public:
       throw std::invalid_argument("Solver only accepts deterministic or "
                                   "explicit chance modes for games.");
     }
+
+    if (spec_.normalize_returns) {
+      returns_normalizer_ = spec_.game->MaxUtility();
+    } else {
+      returns_normalizer_ = 1.0;
+    }
   }
 
   SolverState init() const {
@@ -118,7 +125,7 @@ public:
     for (const NetPtr &player_net : player_nets_) {
       state.player_opts.emplace_back(player_net->parameters(), player_opt_config);
     }
-    if (has_baseline) {
+    if (has_baseline_) {
       auto baseline_opt_config = torch::optim::SGDOptions(spec_.baseline_lr_schedule(0))
                                    .weight_decay(spec_.weight_decay);
       for (const NetPtr &baseline_net : baseline_nets_) {
@@ -134,7 +141,7 @@ public:
     // set networks to eval mode
     for (NetPtr &player_ptr : player_nets_)
       player_ptr->eval();
-    if (has_baseline)
+    if (has_baseline_)
       for (NetPtr &baseline_ptr : baseline_nets_)
         baseline_ptr->eval();
 
@@ -162,7 +169,7 @@ public:
 
       // update networks
       update_player(player, {std::move(strategy_memory_buffer)}, state);
-      if (has_baseline) {
+      if (has_baseline_) {
         update_baseline(player, {std::move(utility_memory_buffer)}, state);
       }
     }
@@ -178,7 +185,7 @@ private:
                   std::vector<UtilityExample> &utility_memory_buffer,
                   SolverState &solver_state) {
     if (state.IsTerminal()) {
-      return state.PlayerReturn(player);
+      return state.PlayerReturn(player) / returns_normalizer_;
     } else if (state.IsChanceNode()) {
       auto chance_outcomes = state.ChanceOutcomes();
       const auto [chosen_action, sample_action_prob] =
@@ -231,7 +238,7 @@ private:
     // update average policy
     if (current_player == player && update_tabular_policy_) {
       solver_state.avg_policy.UpdateStatePolicy(
-          state.InformationStateString(player), strategy_probs,
+          state.InformationStateString(player), solver_state.time, strategy_probs,
           player_reach_prob, sample_reach_prob);
     }
 
@@ -250,7 +257,7 @@ private:
         utility_memory_buffer, solver_state);
 
     // update utility memory buffer
-    if (current_player == player && has_baseline) {
+    if (current_player == player && has_baseline_) {
       utility_memory_buffer.emplace_back(
           std::make_tuple(player_features.to(torch::kCPU), chosen_action),
           subgame_utility);
@@ -258,7 +265,7 @@ private:
 
     // caculate estimated baselines
     const torch::Tensor exp_utilities = [&]() {
-      if (has_baseline && current_player == player && spec_.baseline_start_step <= solver_state.step) {
+      if (has_baseline_ && current_player == player && spec_.baseline_start_step <= solver_state.step) {
           Net &baseline_net = *baseline_nets_[player];
           return legal_actions_mask *
                  baseline_net.forward(features_builder_.batch(player_features))
@@ -431,13 +438,14 @@ private:
   }
 
 private:
-  const bool has_baseline;
+  const bool has_baseline_;
+  double returns_normalizer_;
   const SolverSpec spec_;
   std::vector<NetPtr> player_nets_;
   std::vector<NetPtr> baseline_nets_;
   FeaturesBuilder features_builder_;
   std::mt19937 rng_;
-  bool update_tabular_policy_;
+  const bool update_tabular_policy_;
 };
 
 } // namespace dmc

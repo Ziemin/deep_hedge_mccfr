@@ -7,6 +7,7 @@
 #include <open_spiel/spiel.h>
 #include <unistd.h>
 #include <vector>
+#include <range/v3/all.hpp>
 
 #include <torch/torch.h>
 
@@ -26,11 +27,25 @@ ABSL_FLAG(double, lr, 1e-3, "Learning rate");
 ABSL_FLAG(bool, without_baseline, false, "Do not use baseline");
 ABSL_FLAG(double, baseline_lr, 0.0, "Baseline Learning rate");
 ABSL_FLAG(int, baseline_start, 0, "Step to start using baseline");
+ABSL_FLAG(int, batch_size, 64, "Batch size");
 ABSL_FLAG(double, wd, 1e-2, "Weight Decays");
-ABSL_FLAG(int, units_factor, 4, "Unit layers factor");
+ABSL_FLAG(std::vector<std::string>, units,
+          std::vector<std::string>({"32", "32"}), "Networks hidden units");
+ABSL_FLAG(std::vector<std::string>, baseline_units,
+          std::vector<std::string>(), "Baseline Networks hidden units");
 ABSL_FLAG(double, threshold, 2.0, "Logits threshold cut-off");
+ABSL_FLAG(bool, normalize_returns, true, "Normalize player returns to range [-1, 1]");
 ABSL_FLAG(bool, on_cpu, false, "Use only cpu");
 ABSL_FLAG(int, eval_freq, 100, "Strategy evaluation frequency");
+
+
+std::vector<uint32_t> get_units(const std::vector<std::string>& units_str) {
+  return units_str
+    | ranges::views::transform([](const std::string &num_str) {
+                                 return (uint32_t)std::stoi(num_str);
+                               })
+    | ranges::to_vector;
+}
 
 int main(int argc, char **argv) {
   absl::ParseCommandLine(argc, argv);
@@ -52,22 +67,23 @@ int main(int argc, char **argv) {
   if (torch::cuda::is_available() && !absl::GetFlag(FLAGS_on_cpu))
     device = torch::Device(torch::kCUDA);
 
-  const int units_factor = absl::GetFlag(FLAGS_units_factor);
-  std::array<uint32_t, 3> hidden_units;
-  hidden_units[0] = units_factor * 12;
-  hidden_units[1] = units_factor * 12;
-  hidden_units[2] = units_factor * 16;
+  std::vector<uint32_t> hidden_units = get_units(absl::GetFlag(FLAGS_units));
+  std::vector<uint32_t> baseline_units = get_units(absl::GetFlag(FLAGS_baseline_units));
+  if (baseline_units.empty()) {
+    baseline_units = hidden_units;
+  }
 
   std::vector<std::shared_ptr<dmc::nets::StackedLinearNet>> players;
   std::vector<std::shared_ptr<dmc::nets::StackedLinearNet>> baselines;
   for (int p = 0; p < p_count; p++) {
-    auto player_net = std::make_shared<dmc::nets::StackedLinearNet>(features_size, actions_size, hidden_units, true);
+    auto player_net = std::make_shared<dmc::nets::StackedLinearNet>(
+        features_size, actions_size, hidden_units, true);
     player_net->to(device);
     players.push_back(std::move(player_net));
 
     if (!absl::GetFlag(FLAGS_without_baseline)) {
       auto baseline_net = std::make_shared<dmc::nets::StackedLinearNet>(
-          features_size, actions_size, hidden_units, true);
+          features_size, actions_size, baseline_units, true);
       baseline_net->to(device);
       baselines.push_back(std::move(baseline_net));
     }
@@ -93,6 +109,7 @@ int main(int argc, char **argv) {
                            : dmc::UpdateMethod::HEDGE;
   spec.weight_decay = absl::GetFlag(FLAGS_wd);
   spec.logits_threshold = absl::GetFlag(FLAGS_threshold);
+  spec.normalize_returns = absl::GetFlag(FLAGS_normalize_returns);
 
   dmc::DeepMwCfrSolver solver(std::move(spec), std::move(players),
                               dmc::features::RawInfoStateBuilder(),

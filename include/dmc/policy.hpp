@@ -38,6 +38,7 @@ public:
   }
 
   void UpdateStatePolicy(const std::string &info_state,
+                         uint64_t time,
                          const std::vector<double> &latest_probs,
                          double player_reach_prob, double sample_reach_prob) {
     auto &state_policy = PolicyTable()[info_state];
