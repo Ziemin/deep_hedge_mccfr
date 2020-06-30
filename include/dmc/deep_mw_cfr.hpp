@@ -34,6 +34,7 @@ struct SolverSpec {
   static inline constexpr double DEFAULT_LOGITS_THRESHOLD = 2.0;
   static inline constexpr double DEFAULT_WEIGHT_DECAY = 0.01;
   static inline constexpr uint64_t DEFAULT_BASELINE_START_STEP = 0;
+  static inline constexpr double DEFAULT_ENTROPY_COST = 0.0;
 
   std::shared_ptr<const open_spiel::Game> game;
   torch::Device device;
@@ -46,6 +47,7 @@ struct SolverSpec {
   size_t batch_size = DEFAULT_BATCH_SIZE;
   double logits_threshold = DEFAULT_LOGITS_THRESHOLD;
   double weight_decay = DEFAULT_WEIGHT_DECAY;
+  double entropy_cost = DEFAULT_ENTROPY_COST;
   uint64_t baseline_start_step = DEFAULT_BASELINE_START_STEP;
   bool normalize_returns = false;
   int seed = 0;
@@ -346,7 +348,6 @@ private:
       if (spec_.update_method == UpdateMethod::MULTIPLICATIVE_WEIGHTS) {
         values = torch::log(1.0 + values);
       }
-      values.requires_grad_(false);
 
       if (spec_.logits_threshold > 0.0) {
         // logits will be increased for these actions
@@ -361,8 +362,10 @@ private:
             logits.ge(-spec_.logits_threshold).to(logits.dtype());
         values = neg_values * can_decrease + pos_values * can_increase;
       }
+      torch::Tensor policy_loss = -(values.detach() * logits).mean();
+      torch::Tensor entropy = -(torch::softmax(logits, 1) * torch::log_softmax(logits, 1)).mean();
 
-      torch::Tensor loss = -(values * logits).mean();
+      torch::Tensor loss = policy_loss - spec_.entropy_cost * entropy;
       loss.backward();
       optimizer.step();
 
@@ -406,7 +409,7 @@ private:
         actions_data.push_back(std::get<1>(example.data));
         utility_data.push_back(example.target);
       }
-      baseline_net.zero_grad();
+      optimizer.zero_grad();
 
       FeaturesType features =
           features_builder_.batch(features_data).to(spec_.device);

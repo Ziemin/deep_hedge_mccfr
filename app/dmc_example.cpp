@@ -34,6 +34,7 @@ ABSL_FLAG(std::vector<std::string>, units,
 ABSL_FLAG(std::vector<std::string>, baseline_units,
           std::vector<std::string>(), "Baseline Networks hidden units");
 ABSL_FLAG(double, threshold, 2.0, "Logits threshold cut-off");
+ABSL_FLAG(double, entropy_cost, 0.0, "Additional entropy loss for logits");
 ABSL_FLAG(bool, normalize_returns, true, "Normalize player returns to range [-1, 1]");
 ABSL_FLAG(bool, on_cpu, false, "Use only cpu");
 ABSL_FLAG(int, eval_freq, 100, "Strategy evaluation frequency");
@@ -109,6 +110,7 @@ int main(int argc, char **argv) {
                            : dmc::UpdateMethod::HEDGE;
   spec.weight_decay = absl::GetFlag(FLAGS_wd);
   spec.logits_threshold = absl::GetFlag(FLAGS_threshold);
+  spec.entropy_cost = absl::GetFlag(FLAGS_entropy_cost);
   spec.normalize_returns = absl::GetFlag(FLAGS_normalize_returns);
 
   dmc::DeepMwCfrSolver solver(std::move(spec), std::move(players),
