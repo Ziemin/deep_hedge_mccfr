@@ -91,6 +91,10 @@ int main(int argc, char **argv) {
   if (players > 0)
     params["players"] = open_spiel::GameParameter(players);
 
+  if (game_name == "goofspiel") {
+    params["num_cards"] = open_spiel::GameParameter(8);
+  }
+
   auto game = open_spiel::LoadGame(game_name, params);
   if (!game) {
     fmt::print(stderr, "Problem loading game {}, exiting...", game_name);

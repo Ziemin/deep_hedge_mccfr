@@ -35,6 +35,7 @@ struct SolverSpec {
   static inline constexpr double DEFAULT_WEIGHT_DECAY = 0.01;
   static inline constexpr uint64_t DEFAULT_BASELINE_START_STEP = 0;
   static inline constexpr double DEFAULT_ENTROPY_COST = 0.0;
+  static inline constexpr uint64_t DEFAULT_PLAYER_UPDATE_FREQ = 1;
 
   std::shared_ptr<const open_spiel::Game> game;
   torch::Device device;
@@ -49,6 +50,7 @@ struct SolverSpec {
   double weight_decay = DEFAULT_WEIGHT_DECAY;
   double entropy_cost = DEFAULT_ENTROPY_COST;
   uint64_t baseline_start_step = DEFAULT_BASELINE_START_STEP;
+  uint64_t player_update_freq = DEFAULT_PLAYER_UPDATE_FREQ;
   bool normalize_returns = false;
   int seed = 0;
 
@@ -102,9 +104,9 @@ public:
       throw std::invalid_argument(
           "Baseline networks should be of the same size as player networks");
     }
-    if (!spec_.game->GetType().provides_observation_tensor) {
+    if (!spec_.game->GetType().provides_information_state_tensor) {
       throw std::invalid_argument(
-          fmt::format("Game: {} does not provide observation tensor",
+          fmt::format("Game: {} does not provide information state tensor",
                       spec_.game->GetType().long_name));
     }
     if (spec_.game->GetType().chance_mode ==
@@ -170,7 +172,9 @@ public:
       }
 
       // update networks
-      update_player(player, {std::move(strategy_memory_buffer)}, state);
+      if (!has_baseline_ || state.step % spec_.player_update_freq == 0) {
+        update_player(player, {std::move(strategy_memory_buffer)}, state);
+      }
       if (has_baseline_) {
         update_baseline(player, {std::move(utility_memory_buffer)}, state);
       }
@@ -367,6 +371,8 @@ private:
 
       torch::Tensor loss = policy_loss - spec_.entropy_cost * entropy;
       loss.backward();
+      // TODO Make it a parameter
+      // torch::nn::utils::clip_grad_norm_(player_net.parameters(), 10.0);
       optimizer.step();
 
       cumulative_loss += loss.item<double>();

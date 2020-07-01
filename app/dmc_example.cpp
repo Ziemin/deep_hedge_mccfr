@@ -5,6 +5,7 @@
 #include <memory>
 #include <open_spiel/algorithms/tabular_exploitability.h>
 #include <open_spiel/spiel.h>
+#include <open_spiel/game_transforms/turn_based_simultaneous_game.h>
 #include <unistd.h>
 #include <vector>
 #include <range/v3/all.hpp>
@@ -36,9 +37,9 @@ ABSL_FLAG(std::vector<std::string>, baseline_units,
 ABSL_FLAG(double, threshold, 2.0, "Logits threshold cut-off");
 ABSL_FLAG(double, entropy_cost, 0.0, "Additional entropy loss for logits");
 ABSL_FLAG(bool, normalize_returns, true, "Normalize player returns to range [-1, 1]");
+ABSL_FLAG(int, player_update_freq, 1, "Number of steps player strategy network is updated");
 ABSL_FLAG(bool, on_cpu, false, "Use only cpu");
 ABSL_FLAG(int, eval_freq, 100, "Strategy evaluation frequency");
-
 
 std::vector<uint32_t> get_units(const std::vector<std::string>& units_str) {
   return units_str
@@ -59,8 +60,16 @@ int main(int argc, char **argv) {
 
   open_spiel::GameParameters params;
   params["players"] = open_spiel::GameParameter(p_count);
+  if (game_name == "goofspiel") {
+    params["num_cards"] = open_spiel::GameParameter(8);
+  }
 
-  auto game = open_spiel::LoadGame(game_name, params);
+  auto game_candidate = open_spiel::LoadGame(game_name, params);
+  auto game = game_candidate;
+  if (game_candidate->GetType().dynamics == open_spiel::GameType::Dynamics::kSimultaneous) {
+    game = open_spiel::ConvertToTurnBased(*game_candidate);
+  }
+
   auto actions_size = game->NumDistinctActions();
   auto features_size = game->InformationStateTensorSize();
 
@@ -112,6 +121,7 @@ int main(int argc, char **argv) {
   spec.logits_threshold = absl::GetFlag(FLAGS_threshold);
   spec.entropy_cost = absl::GetFlag(FLAGS_entropy_cost);
   spec.normalize_returns = absl::GetFlag(FLAGS_normalize_returns);
+  spec.player_update_freq = absl::GetFlag(FLAGS_player_update_freq);
 
   dmc::DeepMwCfrSolver solver(std::move(spec), std::move(players),
                               dmc::features::RawInfoStateBuilder(),
