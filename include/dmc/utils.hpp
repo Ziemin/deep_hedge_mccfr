@@ -20,6 +20,28 @@ torch::Tensor get_probabilities(const std::vector<open_spiel::Action> &legal_act
                                 const torch::Tensor& logits);
 
 open_spiel::ActionsAndProbs to_actions_and_probs(const std::vector<open_spiel::Action> &actions,
-                                 const std::vector<double> &probabilities);
+                                                 const std::vector<double> &probabilities);
+
+template <typename Net, typename FeaturesBuilder>
+open_spiel::ActionsAndProbs
+eval_player_network(Net &player_net, FeaturesBuilder &builder,
+                    const open_spiel::State &state, torch::Device device) {
+
+  const open_spiel::Player current_player = state.CurrentPlayer();
+  const auto player_features =
+      builder.build(state.InformationStateTensor(current_player), device);
+  const auto legal_actions = state.LegalActions(current_player);
+  const auto legal_actions_mask =
+      torch::tensor(state.LegalActionsMask(current_player), torch::kDouble);
+
+  const auto logits =
+    legal_actions_mask * player_net.forward(builder.batch(player_features))
+    .reshape({-1})
+    .toType(torch::kDouble)
+    .to(torch::kCPU);
+
+  const auto probs = to_vector<double>(utils::get_probabilities(legal_actions, logits));
+  return to_actions_and_probs(legal_actions, probs);
+}
 
 } // namespace dmc::utils

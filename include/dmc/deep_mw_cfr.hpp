@@ -26,6 +26,7 @@ struct SolverSpec {
   static inline constexpr double DEFAULT_EPSILON = 0.1;
   static inline constexpr double DEFAULT_ETA = 0.1;
   static inline constexpr double DEFAULT_PLAYER_TRAVERSALS = 1;
+  static inline constexpr double DEFAULT_BASELINE_TRAVERSALS = 1;
   static inline constexpr double DEFAULT_LR_SCHEDULE(uint64_t /*step*/) {
     return 1e-3;
   }
@@ -44,6 +45,7 @@ struct SolverSpec {
   double epsilon = DEFAULT_EPSILON;
   double eta = DEFAULT_ETA;
   uint32_t player_traversals = DEFAULT_PLAYER_TRAVERSALS;
+  uint32_t baseline_traversals = DEFAULT_BASELINE_TRAVERSALS;
   UpdateMethod update_method = DEFAULT_UPDATE;
   size_t batch_size = DEFAULT_BATCH_SIZE;
   double logits_threshold = DEFAULT_LOGITS_THRESHOLD;
@@ -58,7 +60,7 @@ struct SolverSpec {
 
 struct SolverState {
   AvgTabularPolicy avg_policy;
-  uint64_t step = 0, time = 0;
+  uint64_t step = 0;
   std::vector<torch::optim::SGD> player_opts;
   std::vector<torch::optim::SGD> baseline_opts;
 };
@@ -149,38 +151,48 @@ public:
       for (NetPtr &baseline_ptr : baseline_nets_)
         baseline_ptr->eval();
 
-    const uint32_t start_time = state.time;
     for (open_spiel::Player player{0}; player < spec_.game->NumPlayers();
          player++) {
 
-      std::vector<ValueExample> strategy_memory_buffer;
-      std::vector<UtilityExample> utility_memory_buffer;
+      if (state.step % spec_.player_update_freq == 0) {
+        std::vector<ValueExample> strategy_memory_buffer;
+        std::vector<UtilityExample> utility_memory_buffer;
 
-      // collect traversals
-      for (uint32_t traversal = 0; traversal < spec_.player_traversals;
-           traversal++) {
-        state.time = start_time + traversal + 1;
-        auto init_state = spec_.game->NewInitialState();
-        // no gradients required during traversals
-        torch::NoGradGuard no_grad;
+        // collect player traversals
+        for (uint32_t traversal = 0; traversal < spec_.player_traversals;
+             traversal++) {
+          auto init_state = spec_.game->NewInitialState();
+          // no gradients required during traversals
+          torch::NoGradGuard no_grad;
 
-        // fmt::print("========== BEGIN ============\n");
-        // fmt::print("Player: {}\n", player);
-        traverse(player, *init_state, 1.0, 1.0, 1.0, strategy_memory_buffer,
-                 utility_memory_buffer, state);
-        // fmt::print("\n");
-      }
+          traverse(player, *init_state, 1.0, 1.0, 1.0, strategy_memory_buffer,
+                   utility_memory_buffer, state,
+                   /*update_avg_strategy=*/update_tabular_policy_);
+        }
 
-      // update networks
-      if (!has_baseline_ || state.step % spec_.player_update_freq == 0) {
+        // update strategy network
         update_player(player, {std::move(strategy_memory_buffer)}, state);
       }
+
       if (has_baseline_) {
+        std::vector<ValueExample> strategy_memory_buffer;
+        std::vector<UtilityExample> utility_memory_buffer;
+
+        // collect baseline traversals
+        for (uint32_t traversal = 0; traversal < spec_.baseline_traversals;
+             traversal++) {
+          auto init_state = spec_.game->NewInitialState();
+          // no gradients required during traversals
+          torch::NoGradGuard no_grad;
+
+          traverse(player, *init_state, 1.0, 1.0, 1.0, strategy_memory_buffer,
+                   utility_memory_buffer, state, /*update_avg_strategy=*/false);
+          }
+
         update_baseline(player, {std::move(utility_memory_buffer)}, state);
       }
     }
     state.step++;
-    state.time = start_time + spec_.player_traversals;
   }
 
 private:
@@ -189,7 +201,8 @@ private:
                   double sample_reach_prob,
                   std::vector<ValueExample> &strategy_memory_buffer,
                   std::vector<UtilityExample> &utility_memory_buffer,
-                  SolverState &solver_state) {
+                  SolverState &solver_state,
+                  bool update_avg_strategy) {
     if (state.IsTerminal()) {
       return state.PlayerReturn(player) / returns_normalizer_;
     } else if (state.IsChanceNode()) {
@@ -201,7 +214,7 @@ private:
                       others_reach_prob * sample_action_prob,
                       sample_reach_prob * sample_action_prob,
                       strategy_memory_buffer, utility_memory_buffer,
-                      solver_state);
+                      solver_state, update_avg_strategy);
     }
     SPIEL_CHECK_PROB(sample_reach_prob);
 
@@ -242,9 +255,9 @@ private:
     const double strategy_action_prob = strategy_probs[action_ind];
 
     // update average policy
-    if (current_player == player && update_tabular_policy_) {
+    if (current_player == player && update_avg_strategy) {
       solver_state.avg_policy.UpdateStatePolicy(
-          state.InformationStateString(player), solver_state.time, strategy_probs,
+          state.InformationStateString(player), strategy_probs,
           player_reach_prob, sample_reach_prob);
     }
 
@@ -260,7 +273,7 @@ private:
                                  : others_reach_prob,
         sample_reach_prob * sample_action_prob,
         strategy_memory_buffer,
-        utility_memory_buffer, solver_state);
+        utility_memory_buffer, solver_state, update_avg_strategy);
 
     // update utility memory buffer
     if (current_player == player && has_baseline_) {

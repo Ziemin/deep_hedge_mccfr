@@ -1,6 +1,7 @@
 #include <dmc/deep_mw_cfr.hpp>
 #include <dmc/features.hpp>
 #include <dmc/nets.hpp>
+#include <dmc/policy.hpp>
 #include <fmt/core.h>
 #include <memory>
 #include <open_spiel/algorithms/tabular_exploitability.h>
@@ -19,7 +20,9 @@ ABSL_FLAG(std::string, game, "kuhn_poker", "The name of the game to play.");
 ABSL_FLAG(int, players, 2, "How many players in this game, 0 for default.");
 ABSL_FLAG(int, seed, 0, "Seed for the random number generator. 0 for auto.");
 ABSL_FLAG(int, traversals, 10,
-          "Number of individual player traversals before the updates");
+          "Number of individual player traversals before the policy updates");
+ABSL_FLAG(int, baseline_traversals, 10,
+          "Number of individual player traversals before the baseline updates");
 ABSL_FLAG(int, iter, 1000, "Number of algorithm iterations");
 ABSL_FLAG(double, eta, 1.0, "Eta parameters");
 ABSL_FLAG(double, epsi, 0.1, "Epsilon for sampling policy");
@@ -48,6 +51,10 @@ std::vector<uint32_t> get_units(const std::vector<std::string>& units_str) {
                                })
     | ranges::to_vector;
 }
+
+
+using NetType = dmc::nets::StackedLinearNet;
+
 
 int main(int argc, char **argv) {
   absl::ParseCommandLine(argc, argv);
@@ -83,8 +90,8 @@ int main(int argc, char **argv) {
     baseline_units = hidden_units;
   }
 
-  std::vector<std::shared_ptr<dmc::nets::StackedLinearNet>> players;
-  std::vector<std::shared_ptr<dmc::nets::StackedLinearNet>> baselines;
+  std::vector<std::shared_ptr<NetType>> players;
+  std::vector<std::shared_ptr<NetType>> baselines;
   for (int p = 0; p < p_count; p++) {
     auto player_net = std::make_shared<dmc::nets::StackedLinearNet>(
         features_size, actions_size, hidden_units, true);
@@ -92,7 +99,7 @@ int main(int argc, char **argv) {
     players.push_back(std::move(player_net));
 
     if (!absl::GetFlag(FLAGS_without_baseline)) {
-      auto baseline_net = std::make_shared<dmc::nets::StackedLinearNet>(
+      auto baseline_net = std::make_shared<NetType>(
           features_size, actions_size, baseline_units, true);
       baseline_net->to(device);
       baselines.push_back(std::move(baseline_net));
@@ -104,6 +111,7 @@ int main(int argc, char **argv) {
   spec.epsilon = absl::GetFlag(FLAGS_epsi);
   spec.eta = absl::GetFlag(FLAGS_eta);
   spec.player_traversals = absl::GetFlag(FLAGS_traversals);
+  spec.baseline_traversals = absl::GetFlag(FLAGS_baseline_traversals);
   spec.player_lr_schedule = [](auto step) { return absl::GetFlag(FLAGS_lr); };
   double baseline_lr = absl::GetFlag(FLAGS_baseline_lr);
   if (baseline_lr  != 0.0) {
@@ -123,17 +131,25 @@ int main(int argc, char **argv) {
   spec.normalize_returns = absl::GetFlag(FLAGS_normalize_returns);
   spec.player_update_freq = absl::GetFlag(FLAGS_player_update_freq);
 
+  // create policy based on the latest neural network values
+  dmc::NeuralPolicy neural_policy(players, dmc::features::RawInfoStateBuilder(), spec.device);
+
+  // solver creation
   dmc::DeepMwCfrSolver solver(std::move(spec), std::move(players),
                               dmc::features::RawInfoStateBuilder(),
                               std::move(baselines));
 
+  // training iterations
   auto state = solver.init();
   for (int i = 0; i < num_iterations; i++) {
     solver.run_iteration(state);
     if (i % eval_freq == 0) {
-      const double exploitability =
+      const double avg_exploitability =
           open_spiel::algorithms::Exploitability(*game, state.avg_policy);
-      fmt::print("Iteration {}: Exploitability = {}\n", i, exploitability);
+      const double last_exploitability =
+          open_spiel::algorithms::Exploitability(*game, neural_policy);
+      fmt::print("Iteration {}: Exploitability: Avg = {}, Last = {}\n",
+                 i, avg_exploitability, last_exploitability);
     }
   }
 

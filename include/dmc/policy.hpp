@@ -1,10 +1,11 @@
 #pragma once
-#include <open_spiel/spiel_utils.h>
 #include <cmath>
+#include <dmc/utils.hpp>
 #include <numeric>
-#include <unordered_map>
 #include <open_spiel/policy.h>
 #include <open_spiel/spiel.h>
+#include <open_spiel/spiel_utils.h>
+#include <unordered_map>
 #include <vector>
 
 namespace dmc {
@@ -38,7 +39,6 @@ public:
   }
 
   void UpdateStatePolicy(const std::string &info_state,
-                         uint64_t time,
                          const std::vector<double> &latest_probs,
                          double player_reach_prob, double sample_reach_prob) {
     auto &state_policy = PolicyTable()[info_state];
@@ -66,4 +66,29 @@ private:
   // lost bits for the Kahan summation algorithm
   std::unordered_map<std::string, std::vector<double>> c_bits_;
 };
+
+
+template <typename Net, typename FeaturesBuilder>
+class NeuralPolicy : public open_spiel::Policy {
+public:
+  NeuralPolicy(std::vector<std::shared_ptr<Net>> player_nets,
+               FeaturesBuilder features_builder,
+               torch::Device net_device)
+      : player_nets_(std::move(player_nets)),
+        features_builder_(std::move(features_builder)),
+        net_device_(net_device) {}
+
+  open_spiel::ActionsAndProbs
+  GetStatePolicy(const open_spiel::State &state) const override {
+    const open_spiel::Player current_player = state.CurrentPlayer();
+    Net &player_net = *player_nets_[current_player];
+    return utils::eval_player_network(player_net, features_builder_, state, net_device_);
+  }
+
+private:
+  mutable std::vector<std::shared_ptr<Net>> player_nets_;
+  mutable FeaturesBuilder features_builder_;
+  torch::Device net_device_;
+};
+
 } // namespace dmc
