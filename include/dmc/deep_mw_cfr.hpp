@@ -8,6 +8,8 @@
 #include <fmt/ranges.h>
 #include <functional>
 #include <memory>
+#include <cmath>
+#include <nlohmann/json.hpp>
 #include <open_spiel/policy.h>
 #include <open_spiel/spiel.h>
 #include <open_spiel/spiel_utils.h>
@@ -18,43 +20,70 @@
 
 namespace dmc {
 
-using LRSchedule = std::function<double(uint64_t)>;
-
 enum class UpdateMethod { HEDGE, MULTIPLICATIVE_WEIGHTS };
 
 struct SolverSpec {
-  static inline constexpr double DEFAULT_EPSILON = 0.1;
-  static inline constexpr double DEFAULT_ETA = 0.1;
+  static inline constexpr uint64_t DEFAULT_MAX_STEPS = 100000;
   static inline constexpr double DEFAULT_PLAYER_TRAVERSALS = 1;
   static inline constexpr double DEFAULT_BASELINE_TRAVERSALS = 1;
-  static inline constexpr double DEFAULT_LR_SCHEDULE(uint64_t /*step*/) {
-    return 1e-3;
-  }
-  static inline constexpr UpdateMethod DEFAULT_UPDATE = UpdateMethod::HEDGE;
-  static inline constexpr size_t DEFAULT_BATCH_SIZE = 64;
-  static inline constexpr double DEFAULT_LOGITS_THRESHOLD = 2.0;
-  static inline constexpr double DEFAULT_WEIGHT_DECAY = 0.01;
   static inline constexpr uint64_t DEFAULT_BASELINE_START_STEP = 0;
-  static inline constexpr double DEFAULT_ENTROPY_COST = 0.0;
   static inline constexpr uint64_t DEFAULT_PLAYER_UPDATE_FREQ = 1;
 
-  std::shared_ptr<const open_spiel::Game> game;
-  torch::Device device;
-  LRSchedule player_lr_schedule = DEFAULT_LR_SCHEDULE;
-  LRSchedule baseline_lr_schedule = DEFAULT_LR_SCHEDULE;
-  double epsilon = DEFAULT_EPSILON;
-  double eta = DEFAULT_ETA;
+  static inline constexpr double DEFAULT_LR_INIT = 1e-3;
+  static inline constexpr double DEFAULT_LR_END = 1e-6;
+  static inline constexpr uint64_t DEFAULT_DECAYS_STEPS = 1000;
+  static inline constexpr double DEFAULT_DECAY_RATE = 1.0;
+  static inline constexpr double DEFAULT_GRADIENT_CLIPPING_VALUE = 0.0;
+  static inline constexpr double DEFAULT_LOGITS_THRESHOLD = 2.0;
+  static inline constexpr double DEFAULT_WEIGHT_DECAY = 0.01;
+  static inline constexpr double DEFAULT_ENTROPY_COST = 0.0;
+
+  static inline constexpr UpdateMethod DEFAULT_UPDATE = UpdateMethod::HEDGE;
+  static inline constexpr size_t DEFAULT_BATCH_SIZE = 64;
+
+  static inline constexpr double DEFAULT_EPSILON = 0.1;
+  static inline constexpr double DEFAULT_ETA = 1.0;
+
+  uint64_t max_steps = DEFAULT_MAX_STEPS;
   uint32_t player_traversals = DEFAULT_PLAYER_TRAVERSALS;
   uint32_t baseline_traversals = DEFAULT_BASELINE_TRAVERSALS;
-  UpdateMethod update_method = DEFAULT_UPDATE;
-  size_t batch_size = DEFAULT_BATCH_SIZE;
+  uint64_t baseline_start_step = DEFAULT_BASELINE_START_STEP;
+  uint64_t player_update_freq = DEFAULT_PLAYER_UPDATE_FREQ;
+
+  double player_lr_init = DEFAULT_LR_INIT;
+  double baseline_lr_init = DEFAULT_LR_INIT;
+  double player_lr_end = DEFAULT_LR_END;
+  double baseline_lr_end = DEFAULT_LR_END;
+  uint64_t decay_steps = DEFAULT_DECAYS_STEPS;
+  double decay_rate = DEFAULT_DECAY_RATE;
+  double gradient_clipping_value = DEFAULT_GRADIENT_CLIPPING_VALUE;
   double logits_threshold = DEFAULT_LOGITS_THRESHOLD;
   double weight_decay = DEFAULT_WEIGHT_DECAY;
   double entropy_cost = DEFAULT_ENTROPY_COST;
-  uint64_t baseline_start_step = DEFAULT_BASELINE_START_STEP;
-  uint64_t player_update_freq = DEFAULT_PLAYER_UPDATE_FREQ;
+
+  UpdateMethod update_method = DEFAULT_UPDATE;
+  double eta = DEFAULT_ETA;
+  size_t batch_size = DEFAULT_BATCH_SIZE;
   bool normalize_returns = false;
+
+  double epsilon = DEFAULT_EPSILON;
   int seed = 0;
+
+  double lr(uint64_t step, double init_lr, double end_lr) const {
+    return fmax(init_lr * pow(decay_rate, ((double) step) / (double) decay_steps),
+                end_lr);
+  }
+
+  double player_lr(uint64_t step) const {
+    return lr(step, player_lr_init, player_lr_end);
+  }
+
+  double baseline_lr(uint64_t step) const {
+    return lr(step, baseline_lr_init, baseline_lr_end);
+  }
+
+  nlohmann::json to_json() const;
+  static SolverSpec from_json(const nlohmann::json& spec_json);
 
 };
 
@@ -81,14 +110,21 @@ public:
   static_assert(std::is_base_of<torch::nn::Module, Net>(),
                 "Net has to be torch::nn::Module");
 
-  DeepMwCfrSolver(SolverSpec spec, std::vector<NetPtr> player_nets,
+  DeepMwCfrSolver(std::shared_ptr<const open_spiel::Game> game,
+                  SolverSpec spec,
+                  std::vector<NetPtr> player_nets,
                   FeaturesBuilder features_builder,
+                  torch::Device net_device,
                   std::vector<NetPtr> baseline_nets = {},
                   bool update_tabular_policy = true)
-    : has_baseline_(baseline_nets.size() > 0),
-      spec_(std::move(spec)), player_nets_(std::move(player_nets)),
+    : game_(game),
+      spec_(std::move(spec)),
+      has_baseline_(baseline_nets.size() > 0),
+      player_nets_(std::move(player_nets)),
       baseline_nets_(std::move(baseline_nets)),
-      features_builder_(std::move(features_builder)), rng_(spec_.seed),
+      net_device_(net_device),
+      features_builder_(std::move(features_builder)),
+      rng_(spec_.seed),
       update_tabular_policy_(update_tabular_policy) {
 
     static_assert(
@@ -98,7 +134,7 @@ public:
         "FeaturesBuilder should return the same type as is expected "
         "by the networks");
 
-    if (player_nets_.size() != spec_.game->NumPlayers()) {
+    if (player_nets_.size() != (size_t)game_->NumPlayers()) {
       throw std::invalid_argument(
           "There should be the a network for every player");
     }
@@ -106,34 +142,34 @@ public:
       throw std::invalid_argument(
           "Baseline networks should be of the same size as player networks");
     }
-    if (!spec_.game->GetType().provides_information_state_tensor) {
+    if (!game_->GetType().provides_information_state_tensor) {
       throw std::invalid_argument(
           fmt::format("Game: {} does not provide information state tensor",
-                      spec_.game->GetType().long_name));
+                      game_->GetType().long_name));
     }
-    if (spec_.game->GetType().chance_mode ==
+    if (game_->GetType().chance_mode ==
         open_spiel::GameType::ChanceMode::kSampledStochastic) {
       throw std::invalid_argument("Solver only accepts deterministic or "
                                   "explicit chance modes for games.");
     }
 
     if (spec_.normalize_returns) {
-      returns_normalizer_ = spec_.game->MaxUtility();
+      returns_normalizer_ = game_->MaxUtility();
     } else {
       returns_normalizer_ = 1.0;
     }
   }
 
   SolverState init() const {
-    SolverState state{AvgTabularPolicy(*spec_.game)};
-    auto player_opt_config = torch::optim::SGDOptions(spec_.player_lr_schedule(0))
-                          .weight_decay(spec_.weight_decay);
+    SolverState state{AvgTabularPolicy(*game_)};
+    auto player_opt_config = torch::optim::SGDOptions(spec_.player_lr(0))
+      .weight_decay(spec_.weight_decay);
     for (const NetPtr &player_net : player_nets_) {
       state.player_opts.emplace_back(player_net->parameters(), player_opt_config);
     }
     if (has_baseline_) {
-      auto baseline_opt_config = torch::optim::SGDOptions(spec_.baseline_lr_schedule(0))
-                                   .weight_decay(spec_.weight_decay);
+      auto baseline_opt_config = torch::optim::SGDOptions(spec_.baseline_lr(0))
+        .weight_decay(spec_.weight_decay);
       for (const NetPtr &baseline_net : baseline_nets_) {
         state.baseline_opts.emplace_back(baseline_net->parameters(),
                                          baseline_opt_config);
@@ -151,7 +187,7 @@ public:
       for (NetPtr &baseline_ptr : baseline_nets_)
         baseline_ptr->eval();
 
-    for (open_spiel::Player player{0}; player < spec_.game->NumPlayers();
+    for (open_spiel::Player player{0}; player < game_->NumPlayers();
          player++) {
 
       if (state.step % spec_.player_update_freq == 0) {
@@ -161,7 +197,7 @@ public:
         // collect player traversals
         for (uint32_t traversal = 0; traversal < spec_.player_traversals;
              traversal++) {
-          auto init_state = spec_.game->NewInitialState();
+          auto init_state = game_->NewInitialState();
           // no gradients required during traversals
           torch::NoGradGuard no_grad;
 
@@ -181,7 +217,7 @@ public:
         // collect baseline traversals
         for (uint32_t traversal = 0; traversal < spec_.baseline_traversals;
              traversal++) {
-          auto init_state = spec_.game->NewInitialState();
+          auto init_state = game_->NewInitialState();
           // no gradients required during traversals
           torch::NoGradGuard no_grad;
 
@@ -221,7 +257,7 @@ private:
     const open_spiel::Player current_player = state.CurrentPlayer();
     // get information state representation for the current player
     const FeaturesType player_features = features_builder_.build(
-        state.InformationStateTensor(current_player), spec_.device);
+        state.InformationStateTensor(current_player), net_device_);
 
     const auto legal_actions = state.LegalActions(current_player);
     const auto legal_actions_mask =
@@ -292,7 +328,7 @@ private:
                      .toType(torch::kDouble)
                      .to(torch::kCPU);
       } else {
-        return torch::zeros({spec_.game->NumDistinctActions()}, torch::kDouble);
+        return torch::zeros({game_->NumDistinctActions()}, torch::kDouble);
       }
     }();
 
@@ -330,7 +366,7 @@ private:
     // set learning rate
     torch::optim::SGDOptions &opt_config =
         dynamic_cast<torch::optim::SGDOptions &>(optimizer.defaults());
-    opt_config.lr(spec_.player_lr_schedule(state.step));
+    opt_config.lr(spec_.player_lr(state.step));
 
     Net &player_net = *player_nets_[player];
     player_net.train();
@@ -344,7 +380,7 @@ private:
     double batch_count = 0.0;
 
     torch::Tensor zero = torch::zeros(
-        {}, torch::TensorOptions().dtype(torch::kFloat32).device(spec_.device));
+        {}, torch::TensorOptions().dtype(torch::kFloat32).device(net_device_));
 
     for (const auto &data_batch : *data_loader) {
       for (const auto &example : data_batch) {
@@ -353,10 +389,10 @@ private:
       }
       optimizer.zero_grad();
       FeaturesType features =
-          features_builder_.batch(features_data).to(spec_.device);
+          features_builder_.batch(features_data).to(net_device_);
       torch::Tensor values =
           spec_.eta *
-          torch::stack(values_data).toType(torch::kFloat32).to(spec_.device);
+          torch::stack(values_data).toType(torch::kFloat32).to(net_device_);
 
       torch::Tensor logits = player_net.forward(features);
       // center logits around mean
@@ -384,8 +420,10 @@ private:
 
       torch::Tensor loss = policy_loss - spec_.entropy_cost * entropy;
       loss.backward();
-      // TODO Make it a parameter
-      // torch::nn::utils::clip_grad_norm_(player_net.parameters(), 10.0);
+
+      if (spec_.gradient_clipping_value > 0) {
+        torch::nn::utils::clip_grad_value_(player_net.parameters(), spec_.gradient_clipping_value);
+      }
       optimizer.step();
 
       cumulative_loss += loss.item<double>();
@@ -406,7 +444,7 @@ private:
     // set learning rate
     torch::optim::SGDOptions &opt_config =
         dynamic_cast<torch::optim::SGDOptions &>(optimizer.defaults());
-    opt_config.lr(spec_.baseline_lr_schedule(state.step));
+    opt_config.lr(spec_.baseline_lr(state.step));
 
     Net &baseline_net = *baseline_nets_[player];
     baseline_net.train();
@@ -431,21 +469,25 @@ private:
       optimizer.zero_grad();
 
       FeaturesType features =
-          features_builder_.batch(features_data).to(spec_.device);
+          features_builder_.batch(features_data).to(net_device_);
       torch::Tensor batch_inds =
-          torch::arange((int64_t)features_data.size(), spec_.device);
+          torch::arange((int64_t)features_data.size(), net_device_);
       torch::Tensor action_inds = torch::tensor(
           actions_data,
-          torch::TensorOptions().dtype(torch::kInt64).device(spec_.device));
+          torch::TensorOptions().dtype(torch::kInt64).device(net_device_));
 
       torch::Tensor pred_utilities =
           baseline_net.forward(features).index({batch_inds, action_inds});
       torch::Tensor target_utilities = torch::tensor(
           utility_data,
-          torch::TensorOptions().dtype(torch::kFloat32).device(spec_.device));
+          torch::TensorOptions().dtype(torch::kFloat32).device(net_device_));
 
       torch::Tensor loss = torch::mse_loss(pred_utilities, target_utilities);
       loss.backward();
+      if (spec_.gradient_clipping_value > 0) {
+        torch::nn::utils::clip_grad_value_(baseline_net.parameters(),
+                                           spec_.gradient_clipping_value);
+      }
       optimizer.step();
 
       features_data.clear();
@@ -460,11 +502,13 @@ private:
   }
 
 private:
+  std::shared_ptr<const open_spiel::Game> game_;
+  const SolverSpec spec_;
   const bool has_baseline_;
   double returns_normalizer_;
-  const SolverSpec spec_;
   std::vector<NetPtr> player_nets_;
   std::vector<NetPtr> baseline_nets_;
+  torch::Device net_device_;
   FeaturesBuilder features_builder_;
   std::mt19937 rng_;
   const bool update_tabular_policy_;

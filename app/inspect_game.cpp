@@ -92,7 +92,7 @@ int main(int argc, char **argv) {
     params["players"] = open_spiel::GameParameter(players);
 
   if (game_name == "goofspiel") {
-    params["num_cards"] = open_spiel::GameParameter(8);
+    params["num_cards"] = open_spiel::GameParameter(4);
   }
 
   auto game = open_spiel::LoadGame(game_name, params);

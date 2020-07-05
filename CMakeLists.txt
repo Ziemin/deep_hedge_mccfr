@@ -27,6 +27,10 @@ add_subdirectory(extern/range-v3 EXCLUDE_FROM_ALL)
 # FMT
 add_subdirectory(extern/fmt EXCLUDE_FROM_ALL)
 
+# JSON
+set(JSON_BuildTests OFF CACHE INTERNAL "")
+add_subdirectory(extern/json EXCLUDE_FROM_ALL)
+
 # Open-Spiel
 option(BUILD_WITH_HANABI "Should Hanabi be downloaded and built" ON)
 option(BUILD_WITH_ACPC "Should ACPC be downloaded and built" ON)

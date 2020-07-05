@@ -87,13 +87,13 @@ struct HoldemNet : torch::nn::Module {
       }
       // create card embedding layer
       torch::nn::Linear fcc(
-          torch::nn::LinearOptions(cards_size, card_dim).bias(true));
+          torch::nn::LinearOptions(card_in_dim, card_dim).bias(true));
       register_module(fmt::format("card_fc_{}", ind), fcc);
       card_layers.push_back(fcc);
 
       // create actions embedding layer
       torch::nn::Linear fca(
-          torch::nn::LinearOptions(actions_size, action_dim).bias(true));
+          torch::nn::LinearOptions(action_in_dim, action_dim).bias(true));
       register_module(fmt::format("action_fc_{}", ind), fca);
       action_layers.push_back(fca);
     }
