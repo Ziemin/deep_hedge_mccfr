@@ -27,7 +27,7 @@ target_include_directories(
 target_link_libraries(deep_mw_cfr
   PUBLIC
   ${TORCH_LIBRARIES}
-  # Boost::filesystem
+  Boost::filesystem
   fmt::fmt
   range-v3
   nlohmann_json::nlohmann_json

@@ -3,7 +3,10 @@
 #include <dmc/game.hpp>
 #include <dmc/nets.hpp>
 #include <dmc/policy.hpp>
+#include <boost/filesystem.hpp>
 
+#include <chrono>
+#include <fmt/chrono.h>
 #include <fmt/core.h>
 #include <fmt/ostream.h>
 #include <fstream>
@@ -22,6 +25,8 @@
 
 using NetType = dmc::nets::StackedLinearNet;
 using NetPtr = std::shared_ptr<NetType>;
+
+namespace bfs = boost::filesystem;
 
 struct Experiment {
   std::shared_ptr<const open_spiel::Game> game;
@@ -72,10 +77,16 @@ struct Experiment {
 };
 
 ABSL_FLAG(std::string, config, "./config.json", "Path to config");
+ABSL_FLAG(std::string, name, "", "Experiment name");
+ABSL_FLAG(std::string, dir, "", "Experiment dir");
 ABSL_FLAG(int, eval_freq, 1000, "Strategy evaluation frequency");
 
 int main(int argc, char **argv) {
   absl::ParseCommandLine(argc, argv);
+
+  std::string experiment_name = absl::GetFlag(FLAGS_name);
+  bfs::path experiment_dir(absl::GetFlag(FLAGS_dir));
+  std::time_t time = std::time(nullptr);
 
   // read experiment configuration
   nlohmann::json config_json;
@@ -86,6 +97,21 @@ int main(int argc, char **argv) {
   Experiment experiment = Experiment::from_json(config_json);
   // add defaults to config to see all the parameters
   config_json["spec"] = experiment.spec.to_json();
+
+  if (!experiment_dir.empty()) {
+    fmt::print("Before name\n");
+    experiment_name = experiment_name.empty()
+                          ? experiment.game->GetType().short_name
+                          : experiment_name;
+    experiment_dir /= fmt::format("{}/{:%Y-%m-%d_%H-%M-%S}", experiment_name, *std::localtime(&time));
+    if (!bfs::exists(experiment_dir)) {
+      bfs::create_directories(experiment_dir);
+    }
+    fmt::print("Will save experiment results to: {}\n", experiment_dir.string());
+    std::ofstream config_f(experiment_dir / "config.json");
+    config_f << std::setw(4) << config_json;
+  }
+
   fmt::print("Running experiment for configuration:\n{}\n", config_json.dump(4));
 
   dmc::features::RawInfoStateBuilder features_builder;
@@ -109,6 +135,7 @@ int main(int argc, char **argv) {
   while (state.step < experiment.spec.max_steps) {
     solver.run_iteration(state);
     if (state.step == 1 || state.step % eval_freq == 0) {
+      time = std::time(nullptr);
 
       const double avg_exploitability = open_spiel::algorithms::Exploitability(
           *experiment.game, state.avg_policy);
@@ -116,12 +143,16 @@ int main(int argc, char **argv) {
           *experiment.game, neural_policy);
 
       nlohmann::json step_stats = {
-        {"step", state.step},
-        {"avg_strategy_exploitability", avg_exploitability},
-        {"final_strategy_exploitability", last_exploitability}
-      };
+          {"step", state.step},
+          {"time", fmt::format("{:%Y-%m-%d_%H-%M-%S}", *std::localtime(&time))},
+          {"avg_strategy_exploitability", avg_exploitability},
+          {"final_strategy_exploitability", last_exploitability}};
       fmt::print("{}\n", step_stats.dump(2));
       stats.push_back(std::move(step_stats));
+
+      // save stats
+      std::ofstream stats_f(experiment_dir / "stats.json");
+      stats_f << stats;
     }
   }
 

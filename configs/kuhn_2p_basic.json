@@ -19,6 +19,8 @@
         "baseline_lr_init": 0.01,
         "player_lr_end": 0.000001,
         "baseline_lr_end": 0.000001,
+        "decay_steps": 10000,
+        "decay_rate": 0.95,
         "gradient_clipping_value": 1000,
         "logits_threshold": 2.0,
         "weight_decay": 0.0001,
