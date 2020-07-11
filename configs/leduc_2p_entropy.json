@@ -1,19 +1,19 @@
 {
     "game": {
-        "name": "kuhn_poker",
+        "name": "leduc_poker",
         "params": {
             "players": 2
         }
     },
     "networks": {
-        "player_units": [48, 48, 32],
-        "baseline_units": [48, 48, 32]
+        "player_units": [196, 196, 48],
+        "baseline_units": [128, 128, 32]
     },
-    "device": "cpu",
+    "device": "cuda",
     "spec": {
-        "max_steps": 500000,
-        "player_traversals": 4,
-        "baseline_traversals": 4,
+        "max_steps": 5000000,
+        "player_traversals": 64,
+        "baseline_traversals": 64,
 
         "player_lr_init": 0.01,
         "baseline_lr_init": 0.01,

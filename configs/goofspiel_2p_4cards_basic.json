@@ -1,19 +1,20 @@
 {
     "game": {
-        "name": "kuhn_poker",
+        "name": "goofspiel",
         "params": {
-            "players": 2
+            "players": 2,
+            "num_cards": 4
         }
     },
     "networks": {
-        "player_units": [48, 48, 32],
-        "baseline_units": [48, 48, 32]
+        "player_units": [196, 196, 48],
+        "baseline_units": [128, 128, 32]
     },
-    "device": "cpu",
+    "device": "cuda",
     "spec": {
-        "max_steps": 500000,
-        "player_traversals": 4,
-        "baseline_traversals": 4,
+        "max_steps": 5000000,
+        "player_traversals": 16,
+        "baseline_traversals": 16,
 
         "player_lr_init": 0.01,
         "baseline_lr_init": 0.01,
@@ -24,10 +25,10 @@
         "gradient_clipping_value": 1000,
         "logits_threshold": 2.0,
         "weight_decay": 0.0001,
-        "entropy_cost": 0.1,
+        "entropy_cost": 0.0,
 
         "update_method": "hedge",
         "batch_size": 256,
-        "epsilon": 0.1
+        "epsilon": 0.2
     }
 }

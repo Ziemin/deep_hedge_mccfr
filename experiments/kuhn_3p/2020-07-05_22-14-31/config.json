@@ -1,0 +1,44 @@
+{
+    "device": "cpu",
+    "game": {
+        "name": "kuhn_poker",
+        "params": {
+            "players": 3
+        }
+    },
+    "networks": {
+        "baseline_units": [
+            48,
+            48,
+            32
+        ],
+        "player_units": [
+            48,
+            48,
+            32
+        ]
+    },
+    "spec": {
+        "baseline_lr_end": 1e-06,
+        "baseline_lr_init": 0.01,
+        "baseline_start_step": 0,
+        "baseline_traversals": 4,
+        "batch_size": 256,
+        "decay_rate": 0.95,
+        "decay_steps": 10000,
+        "entropy_cost": 0.1,
+        "epsilon": 0.1,
+        "eta": 1.0,
+        "gradient_clipping_value": 1000.0,
+        "logits_threshold": 2.0,
+        "max_steps": 500000,
+        "normalize_returns": false,
+        "player_lr_end": 1e-06,
+        "player_lr_init": 0.01,
+        "player_traversals": 4,
+        "player_update_freq": 1,
+        "seed": 0,
+        "update_method": "hedge",
+        "weight_decay": 0.0001
+    }
+}

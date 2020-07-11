@@ -76,29 +76,100 @@ struct Experiment {
   }
 };
 
+
+//  TODO implement serialization utils - to create only one or two files
+void save_checkpoint(const bfs::path &checkpoint_dir,
+                     const std::vector<NetPtr>& player_nets,
+                     const std::vector<NetPtr>& baseline_nets,
+                     const dmc::SolverState &state)
+{
+  if (!bfs::exists(checkpoint_dir))
+    bfs::create_directories(checkpoint_dir);
+
+  for (size_t ind = 0; ind < player_nets.size(); ind++) {
+    torch::save(
+        player_nets[ind],
+        (checkpoint_dir / fmt::format("player_net_{}.pt", ind)).string());
+    torch::save(
+        state.player_opts[ind],
+        (checkpoint_dir / fmt::format("player_opt_{}.pt", ind)).string());
+  }
+
+  for (size_t ind = 0; ind < baseline_nets.size(); ind++) {
+    torch::save(
+        baseline_nets[ind],
+        (checkpoint_dir / fmt::format("baseline_net_{}.pt", ind)).string());
+    torch::save(
+        state.baseline_opts[ind],
+        (checkpoint_dir / fmt::format("baseline_opt_{}.pt", ind)).string());
+  }
+  std::ofstream step_file((checkpoint_dir / "step.pt").string());
+  step_file << state.step;
+  // TODO: implement avg policy saving
+}
+
+void load_checkpoint(const bfs::path &checkpoint_dir,
+                     const std::vector<NetPtr>& player_nets,
+                     const std::vector<NetPtr>& baseline_nets,
+                     dmc::SolverState &state)
+{
+
+  for (size_t ind = 0; ind < player_nets.size(); ind++) {
+    torch::load(
+        player_nets[ind],
+        (checkpoint_dir / fmt::format("player_net_{}.pt", ind)).string());
+    torch::load(
+        state.player_opts[ind],
+        (checkpoint_dir / fmt::format("player_opt_{}.pt", ind)).string());
+  }
+
+  for (size_t ind = 0; ind < baseline_nets.size(); ind++) {
+    torch::load(
+        baseline_nets[ind],
+        (checkpoint_dir / fmt::format("baseline_net_{}.pt", ind)).string());
+    torch::load(
+        state.baseline_opts[ind],
+        (checkpoint_dir / fmt::format("baseline_opt_{}.pt", ind)).string());
+  }
+  std::ifstream step_file((checkpoint_dir / "step.pt").string());
+  step_file >> state.step;
+  // TODO: implement avg policy loading
+}
+
 ABSL_FLAG(std::string, config, "./config.json", "Path to config");
 ABSL_FLAG(std::string, name, "", "Experiment name");
 ABSL_FLAG(std::string, dir, "", "Experiment dir");
 ABSL_FLAG(int, eval_freq, 1000, "Strategy evaluation frequency");
+ABSL_FLAG(std::string, checkpoint, "", "Continue from checkpoint directory");
+
 
 int main(int argc, char **argv) {
   absl::ParseCommandLine(argc, argv);
 
+  const uint64_t eval_freq = absl::GetFlag(FLAGS_eval_freq);
   std::string experiment_name = absl::GetFlag(FLAGS_name);
   bfs::path experiment_dir(absl::GetFlag(FLAGS_dir));
   std::time_t time = std::time(nullptr);
+  bfs::path config_path(absl::GetFlag(FLAGS_config));
+  bfs::path prev_checkpoint_dir(absl::GetFlag(FLAGS_checkpoint));
+
+  if (!prev_checkpoint_dir.empty()) {
+    experiment_dir = prev_checkpoint_dir.parent_path();
+    config_path = experiment_dir / "config.json";
+  }
 
   // read experiment configuration
   nlohmann::json config_json;
   {
-    std::ifstream in_stream(absl::GetFlag(FLAGS_config));
+    fmt::print(config_path.string());
+    std::ifstream in_stream(config_path.string());
     in_stream >> config_json;
   }
   Experiment experiment = Experiment::from_json(config_json);
   // add defaults to config to see all the parameters
   config_json["spec"] = experiment.spec.to_json();
 
-  if (!experiment_dir.empty()) {
+  if (!experiment_dir.empty() && prev_checkpoint_dir.empty()) {
     fmt::print("Before name\n");
     experiment_name = experiment_name.empty()
                           ? experiment.game->GetType().short_name
@@ -112,7 +183,8 @@ int main(int argc, char **argv) {
     config_f << std::setw(4) << config_json;
   }
 
-  fmt::print("Running experiment for configuration:\n{}\n", config_json.dump(4));
+  fmt::print("Running experiment for configuration:\n{}\n",
+             config_json.dump(4));
 
   dmc::features::RawInfoStateBuilder features_builder;
 
@@ -126,14 +198,22 @@ int main(int argc, char **argv) {
                                   dmc::features::RawInfoStateBuilder(),
                                   experiment.device);
 
-  auto state = solver.init();
-  const uint64_t eval_freq = absl::GetFlag(FLAGS_eval_freq);
   nlohmann::json stats;
+  auto state = solver.init();
+  if (!prev_checkpoint_dir.empty()) {
+    fmt::print("Continuing experiment from the previous checkpoint: {}\n", prev_checkpoint_dir.string());
+    load_checkpoint(prev_checkpoint_dir, experiment.player_nets, experiment.baseline_nets, state);
+    fmt::print("Starting step: {}\n", state.step);
+    std::ifstream stats_f(experiment_dir / "stats.json");
+    stats_f >> stats;
+  }
 
   fmt::print("Running experiment...\n");
 
   while (state.step < experiment.spec.max_steps) {
     solver.run_iteration(state);
+
+    // strategy evaluation
     if (state.step == 1 || state.step % eval_freq == 0) {
       time = std::time(nullptr);
 
@@ -150,9 +230,14 @@ int main(int argc, char **argv) {
       fmt::print("{}\n", step_stats.dump(2));
       stats.push_back(std::move(step_stats));
 
-      // save stats
-      std::ofstream stats_f(experiment_dir / "stats.json");
-      stats_f << stats;
+      if (!experiment_dir.empty()) {
+        // save stats
+        std::ofstream stats_f(experiment_dir / "stats.json");
+        stats_f << stats;
+        const bfs::path &checkpoint_dir = experiment_dir / "checkpoints";
+        fmt::print("Saving checkpoint... step={}\n", state.step);
+        save_checkpoint(checkpoint_dir, experiment.player_nets, experiment.baseline_nets, state);
+      }
     }
   }
 
