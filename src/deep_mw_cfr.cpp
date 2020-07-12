@@ -28,7 +28,6 @@ json SolverSpec::to_json() const {
                                 ? "hedge"
                                 : "multiplicative_weights"},
           {"eta", eta},
-          {"batch_size", batch_size},
           {"normalize_returns", normalize_returns},
 
           {"epsilon", epsilon},
@@ -70,7 +69,6 @@ SolverSpec SolverSpec::from_json(const json &spec_json) {
       spec.update_method = UpdateMethod::MULTIPLICATIVE_WEIGHTS;
   }
   maybe_assign("eta", spec.eta);
-  maybe_assign("batch_size", spec.batch_size);
   maybe_assign("normalize_returns", spec.normalize_returns);
   maybe_assign("epsilon", spec.epsilon);
   maybe_assign("seed", spec.seed);

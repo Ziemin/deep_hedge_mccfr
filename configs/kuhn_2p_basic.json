@@ -25,9 +25,7 @@
         "logits_threshold": 2.0,
         "weight_decay": 0.0001,
         "entropy_cost": 0.1,
-
         "update_method": "hedge",
-        "batch_size": 256,
         "epsilon": 0.1
     }
 }

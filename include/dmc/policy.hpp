@@ -40,7 +40,7 @@ public:
 
   void UpdateStatePolicy(const std::string &info_state,
                          const std::vector<double> &latest_probs,
-                         double player_reach_prob, double sample_reach_prob) {
+                         double update_coeff) {
     auto &state_policy = PolicyTable()[info_state];
     if (state_policy.size() != latest_probs.size()) {
       open_spiel::SpielFatalError(
@@ -49,8 +49,7 @@ public:
     auto &state_bits = c_bits_[info_state];
 
     for (size_t ind = 0; ind < state_policy.size(); ind++) {
-      double increment =
-          player_reach_prob * latest_probs[ind] / sample_reach_prob;
+      double increment = update_coeff * latest_probs[ind];
 
       SPIEL_CHECK_FALSE(std::isnan(increment) || std::isinf(increment));
 
@@ -68,26 +67,23 @@ private:
 };
 
 
-template <typename Net, typename FeaturesBuilder>
+template <typename Net>
 class NeuralPolicy : public open_spiel::Policy {
 public:
   NeuralPolicy(std::vector<std::shared_ptr<Net>> player_nets,
-               FeaturesBuilder features_builder,
                torch::Device net_device)
       : player_nets_(std::move(player_nets)),
-        features_builder_(std::move(features_builder)),
         net_device_(net_device) {}
 
   open_spiel::ActionsAndProbs
   GetStatePolicy(const open_spiel::State &state) const override {
     const open_spiel::Player current_player = state.CurrentPlayer();
     Net &player_net = *player_nets_[current_player];
-    return utils::eval_player_network(player_net, features_builder_, state, net_device_);
+    return utils::eval_player_network(player_net, state, net_device_);
   }
 
 private:
   mutable std::vector<std::shared_ptr<Net>> player_nets_;
-  mutable FeaturesBuilder features_builder_;
   torch::Device net_device_;
 };
 

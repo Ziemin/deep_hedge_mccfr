@@ -27,7 +27,6 @@
         "entropy_cost": 0.1,
 
         "update_method": "hedge",
-        "batch_size": 256,
         "epsilon": 0.1
     }
 }

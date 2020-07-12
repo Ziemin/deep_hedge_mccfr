@@ -186,17 +186,13 @@ int main(int argc, char **argv) {
   fmt::print("Running experiment for configuration:\n{}\n",
              config_json.dump(4));
 
-  dmc::features::RawInfoStateBuilder features_builder;
-
   // instantiate solver
   dmc::DeepMwCfrSolver solver(experiment.game, experiment.spec,
-                              experiment.player_nets, features_builder,
+                              experiment.player_nets,
                               experiment.device, experiment.baseline_nets);
 
   // create policy based on the latest neural network values
-  dmc::NeuralPolicy neural_policy(experiment.player_nets,
-                                  dmc::features::RawInfoStateBuilder(),
-                                  experiment.device);
+  dmc::NeuralPolicy neural_policy(experiment.player_nets, experiment.device);
 
   nlohmann::json stats;
   auto state = solver.init();
