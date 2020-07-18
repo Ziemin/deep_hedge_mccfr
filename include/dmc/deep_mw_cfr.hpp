@@ -338,7 +338,7 @@ private:
     // calculate baseline corrected sampled value for the trained player
     if (current_player == player && traversal_type == TraversalType::PLAYER) {
       torch::Tensor sampled_value =
-          others_reach_prob * exp_utilities / sample_reach_prob;
+        others_reach_prob * (exp_utilities - state_utility) / sample_reach_prob;
       // update strategy memory buffer
       strategy_memory_buffer.features.push_back(player_features);
       strategy_memory_buffer.values.push_back(sampled_value);

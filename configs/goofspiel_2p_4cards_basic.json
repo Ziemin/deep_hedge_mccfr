@@ -14,7 +14,8 @@
     "spec": {
         "max_steps": 5000000,
         "player_traversals": 16,
-        "baseline_traversals": 16,
+        "player_update_freq": 4,
+        "baseline_traversals": 4,
 
         "player_lr_init": 0.01,
         "baseline_lr_init": 0.01,
@@ -25,9 +26,9 @@
         "gradient_clipping_value": 1000,
         "logits_threshold": 2.0,
         "weight_decay": 0.0001,
-        "entropy_cost": 0.0,
+        "entropy_cost": 0.05,
 
         "update_method": "hedge",
-        "epsilon": 0.2
+        "epsilon": 0.1
     }
 }
