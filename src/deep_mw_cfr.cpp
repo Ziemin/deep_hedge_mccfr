@@ -24,9 +24,6 @@ json SolverSpec::to_json() const {
           {"weight_decay", weight_decay},
           {"entropy_cost", entropy_cost},
 
-          {"update_method", update_method == UpdateMethod::HEDGE
-                                ? "hedge"
-                                : "multiplicative_weights"},
           {"eta", eta},
           {"normalize_returns", normalize_returns},
 
@@ -61,13 +58,6 @@ SolverSpec SolverSpec::from_json(const json &spec_json) {
   maybe_assign("weight_decay", spec.weight_decay);
   maybe_assign("entropy_cost", spec.entropy_cost);
 
-  if (auto it = spec_json.find("update_method"); it != spec_json.end()) {
-    auto method_name = it->get<std::string>();
-    if (method_name == "hedge")
-      spec.update_method = UpdateMethod::HEDGE;
-    else if (method_name == "multiplicative_weights")
-      spec.update_method = UpdateMethod::MULTIPLICATIVE_WEIGHTS;
-  }
   maybe_assign("eta", spec.eta);
   maybe_assign("normalize_returns", spec.normalize_returns);
   maybe_assign("epsilon", spec.epsilon);

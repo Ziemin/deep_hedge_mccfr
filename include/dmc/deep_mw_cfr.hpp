@@ -19,8 +19,6 @@
 
 namespace dmc {
 
-enum class UpdateMethod { HEDGE, MULTIPLICATIVE_WEIGHTS };
-
 struct SolverSpec {
   static inline constexpr uint64_t DEFAULT_MAX_STEPS = 100000;
   static inline constexpr double DEFAULT_PLAYER_TRAVERSALS = 1;
@@ -36,8 +34,6 @@ struct SolverSpec {
   static inline constexpr double DEFAULT_LOGITS_THRESHOLD = 2.0;
   static inline constexpr double DEFAULT_WEIGHT_DECAY = 0.01;
   static inline constexpr double DEFAULT_ENTROPY_COST = 0.0;
-
-  static inline constexpr UpdateMethod DEFAULT_UPDATE = UpdateMethod::HEDGE;
 
   static inline constexpr double DEFAULT_EPSILON = 0.1;
   static inline constexpr double DEFAULT_ETA = 1.0;
@@ -59,7 +55,6 @@ struct SolverSpec {
   double weight_decay = DEFAULT_WEIGHT_DECAY;
   double entropy_cost = DEFAULT_ENTROPY_COST;
 
-  UpdateMethod update_method = DEFAULT_UPDATE;
   double eta = DEFAULT_ETA;
   bool normalize_returns = false;
 
@@ -371,10 +366,6 @@ private:
     torch::Tensor logits = player_net.forward(features);
     // center logits around mean
     logits = logits - logits.mean(-1, /*keepdim=*/true);
-
-    if (spec_.update_method == UpdateMethod::MULTIPLICATIVE_WEIGHTS) {
-      values = torch::log(1.0 + values);
-    }
 
     if (spec_.logits_threshold > 0.0) {
       // logits will be increased for these actions

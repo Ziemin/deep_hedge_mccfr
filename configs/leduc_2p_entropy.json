@@ -27,7 +27,6 @@
         "weight_decay": 0.0001,
         "entropy_cost": 0.1,
 
-        "update_method": "hedge",
         "epsilon": 0.1
     }
 }
