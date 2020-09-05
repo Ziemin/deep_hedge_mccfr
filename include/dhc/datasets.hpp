@@ -2,7 +2,7 @@
 #include <torch/torch.h>
 #include <vector>
 
-namespace dmc::data {
+namespace dhc::data {
 
 template <typename ElementType>
 class VectorDataset
@@ -18,4 +18,4 @@ public:
   torch::optional<size_t> size() const override { return data_.size(); }
 };
 
-} // namespace dmc::data
+} // namespace dhc::data

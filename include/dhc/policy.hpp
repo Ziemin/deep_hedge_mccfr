@@ -1,6 +1,10 @@
 #pragma once
+#include <boost/archive/text_iarchive.hpp>
+#include <boost/archive/text_oarchive.hpp>
+#include <boost/serialization/vector.hpp>
+#include <boost/serialization/unordered_map.hpp>
 #include <cmath>
-#include <dmc/utils.hpp>
+#include <dhc/utils.hpp>
 #include <numeric>
 #include <open_spiel/policy.h>
 #include <open_spiel/spiel.h>
@@ -8,10 +12,12 @@
 #include <unordered_map>
 #include <vector>
 
-namespace dmc {
+namespace dhc {
 
 class AvgTabularPolicy : public open_spiel::TabularPolicy {
 public:
+  friend class boost::serialization::access;
+
   AvgTabularPolicy(const open_spiel::Game &game)
       : open_spiel::TabularPolicy(game) {
     for (const auto &[info_state, state_policy] : PolicyTable()) {
@@ -62,6 +68,13 @@ public:
   }
 
 private:
+  template <class Archive>
+  void serialize(Archive &ar, const unsigned int /*version*/) {
+    auto &policy_table = PolicyTable();
+    ar & policy_table;
+    ar & c_bits_;
+  }
+
   // lost bits for the Kahan summation algorithm
   std::unordered_map<std::string, std::vector<double>> c_bits_;
 };
@@ -87,4 +100,4 @@ private:
   torch::Device net_device_;
 };
 
-} // namespace dmc
+} // namespace dhc

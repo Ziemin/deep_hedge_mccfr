@@ -3,7 +3,7 @@
 
 #include <torch/torch.h>
 
-namespace dmc::features {
+namespace dhc::features {
 
 struct RawInfoStateBuilder {
 
@@ -23,4 +23,4 @@ struct RawInfoStateBuilder {
 
 };
 
-} // namespace dmc::features
+} // namespace dhc::features

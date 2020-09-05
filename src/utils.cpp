@@ -1,4 +1,4 @@
-#include <dmc/utils.hpp>
+#include <dhc/utils.hpp>
 #include <open_spiel/spiel.h>
 #include <range/v3/all.hpp>
 #include <torch/torch.h>
@@ -6,7 +6,7 @@
 
 using namespace ranges;
 
-namespace dmc::utils {
+namespace dhc::utils {
 
 torch::Tensor get_probabilities(const std::vector<open_spiel::Action> &legal_actions,
                                 const torch::Tensor &logits) {
@@ -28,4 +28,4 @@ open_spiel::ActionsAndProbs to_actions_and_probs(
     | ::to<std::vector>();
 }
 
-} // namespace dmc::utils
+} // namespace dhc::utils

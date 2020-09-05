@@ -4,7 +4,7 @@
 
 #include <torch/all.h>
 
-namespace dmc::nets {
+namespace dhc::nets {
 
 struct StackedLinearNet : torch::nn::Module {
   using FeaturesType = torch::Tensor;
@@ -153,4 +153,4 @@ private:
   bool normalize;
 };
 
-} // namespace dmc::nets
+} // namespace dhc::nets

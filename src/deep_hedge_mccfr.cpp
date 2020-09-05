@@ -1,8 +1,8 @@
-#include <dmc/deep_mw_cfr.hpp>
+#include <dhc/deep_hedge_mccfr.hpp>
 #include <nlohmann/json.hpp>
 #include <type_traits>
 
-namespace dmc {
+namespace dhc {
 
 using namespace nlohmann;
 
@@ -66,4 +66,4 @@ SolverSpec SolverSpec::from_json(const json &spec_json) {
   return spec;
 }
 
-} // namespace dmc
+} // namespace dhc

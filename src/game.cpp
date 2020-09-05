@@ -2,11 +2,11 @@
 #include <memory>
 #include <nlohmann/json.hpp>
 #include <open_spiel/spiel.h>
-#include <dmc/game.hpp>
+#include <dhc/game.hpp>
 #include <open_spiel/game_transforms/turn_based_simultaneous_game.h>
 
 
-namespace dmc::game {
+namespace dhc::game {
 
   std::shared_ptr<const open_spiel::Game> load_game(const nlohmann::json &game_json) {
     std::string name = game_json["name"].get<std::string>();
@@ -32,4 +32,4 @@ namespace dmc::game {
     return game;
   }
 
-} // namespace dmc::game
+} // namespace dhc::game

@@ -1,19 +1,19 @@
-file(GLOB DEEP_MW_CFR_HEADERS CONFIGURE_DEPENDS "${PROJECT_SOURCE_DIR}/include/dmc/*.hpp")
-file(GLOB DEEP_MW_CFR_SOURCES CONFIGURE_DEPENDS "${PROJECT_SOURCE_DIR}/src/*.cpp")
+file(GLOB DEEP_HEDGE_MCCFR_HEADERS CONFIGURE_DEPENDS "${PROJECT_SOURCE_DIR}/include/dhc/*.hpp")
+file(GLOB DEEP_HEDGE_MCCFR_SOURCES CONFIGURE_DEPENDS "${PROJECT_SOURCE_DIR}/src/*.cpp")
 
 add_library(
-  deep_mw_cfr
+  deep_hedge_mccfr
   STATIC
-  ${DEEP_MW_CFR_SOURCES}
-  ${DEEP_MW_CFR_HEADERS}
+  ${DEEP_HEDGE_MCCFR_SOURCES}
+  ${DEEP_HEDGE_MCCFR_HEADERS}
   ${OPEN_SPIEL_OBJECTS}
 )
-add_library(deep_mw_cfr::deep_mw_cfr ALIAS deep_mw_cfr)
-target_compile_features(deep_mw_cfr PUBLIC cxx_std_20)
-target_compile_options(deep_mw_cfr PRIVATE -Wall -Wextra -Wunreachable-code)
+add_library(deep_hedge_mccfr::deep_hedge_mccfr ALIAS deep_hedge_mccfr)
+target_compile_features(deep_hedge_mccfr PUBLIC cxx_std_20)
+target_compile_options(deep_hedge_mccfr PRIVATE -Wall -Wextra -Wunreachable-code)
 
 target_include_directories(
-  deep_mw_cfr
+  deep_hedge_mccfr
   PUBLIC
   $<INSTALL_INTERFACE:include>
   $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
@@ -24,10 +24,11 @@ target_include_directories(
   ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
-target_link_libraries(deep_mw_cfr
+target_link_libraries(deep_hedge_mccfr
   PUBLIC
   ${TORCH_LIBRARIES}
   Boost::filesystem
+  Boost::serialization
   fmt::fmt
   range-v3
   nlohmann_json::nlohmann_json

@@ -1,8 +1,10 @@
 #pragma once
 
-#include <cmath>
-#include <dmc/policy.hpp>
-#include <dmc/utils.hpp>
+#include <algorithm>
+#include <boost/archive/text_iarchive.hpp>
+#include <boost/archive/text_oarchive.hpp>
+#include <dhc/policy.hpp>
+#include <dhc/utils.hpp>
 #include <fmt/core.h>
 #include <fmt/ostream.h>
 #include <fmt/ranges.h>
@@ -17,7 +19,7 @@
 #include <tuple>
 #include <vector>
 
-namespace dmc {
+namespace dhc {
 
 struct SolverSpec {
   static inline constexpr uint64_t DEFAULT_MAX_STEPS = 100000;
@@ -79,13 +81,22 @@ struct SolverSpec {
 };
 
 struct SolverState {
+  friend class boost::serialization::access;
+
   AvgTabularPolicy avg_policy;
   uint64_t step = 0;
   std::vector<torch::optim::SGD> player_opts;
   std::vector<torch::optim::SGD> baseline_opts;
+
+private:
+  template <class Archive>
+  void serialize(Archive &ar, const unsigned int /*version*/) {
+    ar & avg_policy;
+    ar & step;
+  }
 };
 
-template <typename Net> class DeepMwCfrSolver {
+template <typename Net> class DeepHedgeMCCFRSolver {
 
   struct ValuesBuffer {
     std::vector<torch::Tensor> features, values;
@@ -110,7 +121,7 @@ public:
   static_assert(std::is_base_of<torch::nn::Module, Net>(),
                 "Net has to be torch::nn::Module");
 
-  DeepMwCfrSolver(std::shared_ptr<const open_spiel::Game> game, SolverSpec spec,
+  DeepHedgeMCCFRSolver(std::shared_ptr<const open_spiel::Game> game, SolverSpec spec,
                   std::vector<NetPtr> player_nets, torch::Device net_device,
                   std::vector<NetPtr> baseline_nets = {},
                   bool update_tabular_policy = true)
@@ -124,7 +135,8 @@ public:
       throw std::invalid_argument(
           "There should be the a network for every player");
 
-    if (has_baseline_ && baseline_nets_.size() != player_nets_.size())
+    if (has_baseline_ 
+&& baseline_nets_.size() != player_nets_.size())
       throw std::invalid_argument(
           "Baseline networks should be of the same size as player networks");
 
@@ -446,4 +458,4 @@ private:
   const bool update_tabular_policy_;
 };
 
-} // namespace dmc
+} // namespace dhc

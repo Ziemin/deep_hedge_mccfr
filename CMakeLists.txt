@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.14)
-project(deep_mw_cfr VERSION 0.0.1 LANGUAGES CXX)
+project(deep_hedge_mccfr VERSION 0.0.1 LANGUAGES CXX)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
@@ -10,7 +10,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(Boost_USE_STTIC_LIBS OFF)
 set(Boost_USE_MULTITHREADED ON)
 set(Boost_USE_STATIC_RUNTIME OFF)
-find_package(Boost 1.70 REQUIRED COMPONENTS filesystem)
+find_package(Boost 1.70 REQUIRED COMPONENTS filesystem serialization)
 message(STATUS "Boost version: ${Boost_VERSION}")
 
 # Torch
@@ -81,6 +81,6 @@ endif()
 add_subdirectory(src)
 add_subdirectory(app)
 
-option(DEEP_MW_CFR_BUILD_TESTS "Should the tests for Deep-MW-CFR be built" ON)
+option(DEEP_HEDGE_MCCFR_BUILD_TESTS "Should the tests for Deep-Hedge MCCFR be built" ON)
 enable_testing()
 # add_subdirectory(tests)

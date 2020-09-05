@@ -6,7 +6,7 @@
 #include <torch/torch.h>
 #include <vector>
 
-namespace dmc::utils {
+namespace dhc::utils {
 
 template <typename DType>
 std::vector<DType> to_vector(const torch::Tensor &tensor) {
@@ -49,4 +49,4 @@ open_spiel::ActionsAndProbs eval_player_network(Net &player_net,
   return to_actions_and_probs(legal_actions, probs);
 }
 
-} // namespace dmc::utils
+} // namespace dhc::utils

@@ -1,9 +1,11 @@
-#include <dmc/deep_mw_cfr.hpp>
-#include <dmc/features.hpp>
-#include <dmc/game.hpp>
-#include <dmc/nets.hpp>
-#include <dmc/policy.hpp>
+#include <boost/archive/text_iarchive.hpp>
+#include <boost/archive/text_oarchive.hpp>
 #include <boost/filesystem.hpp>
+#include <dhc/deep_hedge_mccfr.hpp>
+#include <dhc/features.hpp>
+#include <dhc/game.hpp>
+#include <dhc/nets.hpp>
+#include <dhc/policy.hpp>
 
 #include <chrono>
 #include <fmt/chrono.h>
@@ -23,22 +25,22 @@
 #include <absl/flags/flag.h>
 #include <absl/flags/parse.h>
 
-using NetType = dmc::nets::StackedLinearNet;
+using NetType = dhc::nets::StackedLinearNet;
 using NetPtr = std::shared_ptr<NetType>;
 
 namespace bfs = boost::filesystem;
 
 struct Experiment {
   std::shared_ptr<const open_spiel::Game> game;
-  dmc::SolverSpec spec;
+  dhc::SolverSpec spec;
   std::vector<NetPtr> player_nets, baseline_nets;
   torch::Device device;
 
   static Experiment from_json(const nlohmann::json &experiment_json) {
     // load game
-    auto game = dmc::game::load_game(experiment_json["game"]);
+    auto game = dhc::game::load_game(experiment_json["game"]);
     // load solver specification
-    auto spec = dmc::SolverSpec::from_json(experiment_json["spec"]);
+    auto spec = dhc::SolverSpec::from_json(experiment_json["spec"]);
 
     // set training device
     torch::Device device = torch::Device(torch::kCPU);
@@ -60,7 +62,7 @@ struct Experiment {
     std::vector<std::shared_ptr<NetType>> players;
     std::vector<std::shared_ptr<NetType>> baselines;
     for (int p = 0; p < game->NumPlayers(); p++) {
-      auto player_net = std::make_shared<dmc::nets::StackedLinearNet>(
+      auto player_net = std::make_shared<dhc::nets::StackedLinearNet>(
           features_size, actions_size, player_units, true);
       player_net->to(device);
       players.push_back(std::move(player_net));
@@ -81,7 +83,7 @@ struct Experiment {
 void save_checkpoint(const bfs::path &checkpoint_dir,
                      const std::vector<NetPtr>& player_nets,
                      const std::vector<NetPtr>& baseline_nets,
-                     const dmc::SolverState &state)
+                     const dhc::SolverState &state)
 {
   if (!bfs::exists(checkpoint_dir))
     bfs::create_directories(checkpoint_dir);
@@ -103,15 +105,18 @@ void save_checkpoint(const bfs::path &checkpoint_dir,
         state.baseline_opts[ind],
         (checkpoint_dir / fmt::format("baseline_opt_{}.pt", ind)).string());
   }
-  std::ofstream step_file((checkpoint_dir / "step.pt").string());
-  step_file << state.step;
-  // TODO: implement avg policy saving
+
+  std::ofstream state_file((checkpoint_dir / "state.archive").string());
+  {
+    boost::archive::text_oarchive oa(state_file);
+    oa << state;
+  }
 }
 
 void load_checkpoint(const bfs::path &checkpoint_dir,
                      const std::vector<NetPtr>& player_nets,
                      const std::vector<NetPtr>& baseline_nets,
-                     dmc::SolverState &state)
+                     dhc::SolverState &state)
 {
 
   for (size_t ind = 0; ind < player_nets.size(); ind++) {
@@ -131,9 +136,11 @@ void load_checkpoint(const bfs::path &checkpoint_dir,
         state.baseline_opts[ind],
         (checkpoint_dir / fmt::format("baseline_opt_{}.pt", ind)).string());
   }
-  std::ifstream step_file((checkpoint_dir / "step.pt").string());
-  step_file >> state.step;
-  // TODO: implement avg policy loading
+  std::ifstream state_file((checkpoint_dir / "state.archive").string());
+  {
+    boost::archive::text_iarchive ia(state_file);
+    ia >> state;
+  }
 }
 
 ABSL_FLAG(std::string, config, "./config.json", "Path to config");
@@ -187,12 +194,12 @@ int main(int argc, char **argv) {
              config_json.dump(4));
 
   // instantiate solver
-  dmc::DeepMwCfrSolver solver(experiment.game, experiment.spec,
+  dhc::DeepHedgeMCCFRSolver solver(experiment.game, experiment.spec,
                               experiment.player_nets,
                               experiment.device, experiment.baseline_nets);
 
   // create policy based on the latest neural network values
-  dmc::NeuralPolicy neural_policy(experiment.player_nets, experiment.device);
+  dhc::NeuralPolicy neural_policy(experiment.player_nets, experiment.device);
 
   nlohmann::json stats;
   auto state = solver.init();
