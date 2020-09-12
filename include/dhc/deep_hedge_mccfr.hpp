@@ -135,8 +135,7 @@ public:
       throw std::invalid_argument(
           "There should be the a network for every player");
 
-    if (has_baseline_ 
-&& baseline_nets_.size() != player_nets_.size())
+    if (has_baseline_ && baseline_nets_.size() != player_nets_.size())
       throw std::invalid_argument(
           "Baseline networks should be of the same size as player networks");
 
@@ -217,11 +216,11 @@ public:
           }
 
           update_baseline(player, utility_memory_buffer, state);
+          utility_memory_buffer.clear();
         }
       }
       // clear buffers for the next player
       strategy_memory_buffer.clear();
-      utility_memory_buffer.clear();
     }
 
     state.step++;

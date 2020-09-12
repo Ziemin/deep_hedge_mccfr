@@ -1,0 +1,43 @@
+{
+    "device": "cuda",
+    "game": {
+        "name": "leduc_poker",
+        "params": {
+            "players": 2
+        }
+    },
+    "networks": {
+        "baseline_units": [
+            128,
+            128,
+            32
+        ],
+        "player_units": [
+            196,
+            196,
+            48
+        ]
+    },
+    "spec": {
+        "baseline_lr_end": 1e-06,
+        "baseline_lr_init": 0.01,
+        "baseline_start_step": 0,
+        "baseline_traversals": 32,
+        "decay_rate": 0.97,
+        "decay_steps": 1000,
+        "entropy_cost": 0.05,
+        "epsilon": 0.1,
+        "eta": 1.0,
+        "gradient_clipping_value": 1000.0,
+        "logits_threshold": 1.8,
+        "max_steps": 5000000,
+        "normalize_returns": true,
+        "player_lr_end": 1e-06,
+        "player_lr_init": 0.01,
+        "player_traversals": 196,
+        "player_update_freq": 4,
+        "seed": 0,
+        "update_method": "hedge",
+        "weight_decay": 0.0001
+    }
+}
