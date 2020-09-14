@@ -7,6 +7,8 @@
 #include <fmt/ostream.h>
 #include <fmt/ranges.h>
 #include <open_spiel/game_parameters.h>
+#include <open_spiel/game_transforms/turn_based_simultaneous_game.h>
+#include <open_spiel/policy.h>
 #include <open_spiel/spiel.h>
 #include <random>
 #include <string>
@@ -100,7 +102,13 @@ int main(int argc, char **argv) {
     fmt::print(stderr, "Problem loading game {}, exiting...", game_name);
     return -1;
   }
+  if (game->GetType().dynamics ==
+      open_spiel::GameType::Dynamics::kSimultaneous) {
+    game = open_spiel::ConvertToTurnBased(*game);
+  }
   fmt::print("{}\n", *game);
+  open_spiel::TabularPolicy policy(*game);
+  fmt::print("Number of information sets: {}\n", policy.PolicyTable().size());
 
   if (gen_playthrough) {
     fmt::print("Generating random playthrough...\n");
